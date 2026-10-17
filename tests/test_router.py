@@ -10,7 +10,7 @@ import os
 import sys
 
 ROUTER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      "ninfer-router.py")
+                      "model-router.py")
 
 
 def load():

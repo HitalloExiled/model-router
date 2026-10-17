@@ -63,7 +63,7 @@ def main():
         d = {"model": model, "messages": [{"role": "user", "content": content}]}
         if effort:
             d["reasoning_effort"] = effort
-        prof, new_body, _note = nr.normalize_chat_body(P, json.dumps(d).encode())
+        prof, new_body, _note, _mm = nr.normalize_chat_body(P, json.dumps(d).encode())
         return prof, json.loads(new_body).get("reasoning_effort", "<ABSENT>")
 
     for label, model, content, sent, want in [
@@ -96,6 +96,40 @@ def main():
         ("vision-overflow-leaves", "balanced", "vision", 16000, False, "balanced"),
     ]:
         check(f"reuse:{label}", E(w, c, e, m), want)
+
+    # Encoder (mmproj) state must be tracked separately from the profile name,
+    # or a media request reboots the same GGUF backend on every call.
+    S = nr.same_backend
+    for label, cn, cm, p, wm, want in [
+        ("exact-text", "balanced", False, "balanced", False, True),
+        ("encoder-added-reboots", "gguf-max", False, "gguf-max", True, False),
+        ("encoder-kept-reuses", "gguf-max", True, "gguf-max", True, True),
+        ("encoder-removed-reboots", "gguf-max", True, "gguf-max", False, False),
+        ("tier-differs", "balanced", False, "ultra", False, False),
+        ("nothing-running", None, False, "balanced", False, False),
+    ]:
+        check(f"same:{label}", S(cn, cm, p, wm), want)
+
+    # Adoption must recognize a live container from its server args, else the
+    # router reboots a healthy backend on startup.
+    I = nr.infer_profile
+    for label, args, want in [
+        ("llama-alias-single192",
+         "-m /models/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf --alias "
+         "qwen3.8-gguf-single192 -c 196608 --parallel 1 --mmproj /m/mmproj.gguf",
+         "gguf-single192"),
+        ("llama-alias-max", "--alias qwen3.8-gguf-max -c 262144", "gguf-max"),
+        ("llama-no-alias-parallel4", "-m x.gguf --parallel 4", "gguf-quad"),
+        ("llama-no-alias-parallel2-128",
+         "-m x.gguf --parallel 2 -c 131072", "gguf-duo"),
+        ("llama-no-alias-parallel2-256",
+         "-m x.gguf --parallel 2 -c 262144", "gguf-duo128"),
+        ("ninfer-131072", "--max-context 131072 --kv-dtype rk8v4", "balanced"),
+        ("ninfer-eq-262144", "--max-context=262144", "ultra"),
+        ("unknown", "--foo bar", None),
+        ("empty", "", None),
+    ]:
+        check(f"adopt:{label}", I(args), want)
 
     if FAILURES:
         print(f"\n{len(FAILURES)} FAILURES")

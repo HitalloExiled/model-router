@@ -28,12 +28,19 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROUTER_DIR = os.path.dirname(os.path.abspath(__file__))
-# Sibling-checkout defaults (~/Projetos/ThirdParty/{ninfer,gguf}-stack);
-# override via env when laid out differently.
-STACKS_DIR = os.path.dirname(ROUTER_DIR)
+
+
+def stack_dir(name):
+    """Locate a stack checkout: inside the router repo (git submodule) first,
+    then as a sibling checkout (~/Projetos/My/<name>)."""
+    inside = os.path.join(ROUTER_DIR, name)
+    return inside if os.path.isdir(inside) else os.path.join(
+        os.path.dirname(ROUTER_DIR), name)
+
+
 SERVE = os.environ.get(
-    "NINFER_SERVE_SH", os.path.join(STACKS_DIR, "ninfer-stack", "serve.sh"))
-NINFER_MODELS_DEFAULT = os.path.join(STACKS_DIR, "ninfer-stack", "models")
+    "NINFER_SERVE_SH", os.path.join(stack_dir("ninfer-stack"), "serve.sh"))
+NINFER_MODELS_DEFAULT = os.path.join(stack_dir("ninfer-stack"), "models")
 MODEL_FILE = os.path.join(
     os.environ.get("NINFER_MODEL_DIR", NINFER_MODELS_DEFAULT),
     "qwen3_8_27b.ninfer",
@@ -50,7 +57,7 @@ IMAGE = os.environ.get("NINFER_DOCKER_IMAGE", "ninfer-4090:sm89")
 LLAMA_IMAGE = os.environ.get("NINFER_LLAMA_IMAGE",
                              "ghcr.io/ggml-org/llama.cpp:server-cuda")
 GGUF_DIR = os.environ.get(
-    "NINFER_GGUF_DIR", os.path.join(STACKS_DIR, "gguf-stack", "models"))
+    "NINFER_GGUF_DIR", os.path.join(stack_dir("gguf-stack"), "models"))
 GGUF_FILES = {
     "gguf-speed": "Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
     "gguf-range": "Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf",
@@ -146,7 +153,7 @@ def stop_backend():
 
 
 SERVE_LLAMA = os.environ.get(
-    "LLAMA_SERVE_SH", os.path.join(STACKS_DIR, "gguf-stack", "serve-llama.sh"))
+    "LLAMA_SERVE_SH", os.path.join(stack_dir("gguf-stack"), "serve-llama.sh"))
 
 
 def launch_command(profile, want_mmproj=False):

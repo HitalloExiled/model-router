@@ -30,13 +30,18 @@ export LC_ALL=C LC_NUMERIC=C
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
-STACKS_DIR="$(cd -- "${ROOT_DIR}/.." && pwd)"
+PARENT_DIR="$(cd -- "${ROOT_DIR}/.." && pwd)"
 
-NINFER_STACK="${STACKS_DIR}/ninfer-stack"
-GGUF_STACK="${STACKS_DIR}/gguf-stack"
+# Stacks are git submodules (inside ROOT_DIR); fall back to sibling checkouts.
+resolve_stack() {
+  if [[ -d "${ROOT_DIR}/$1" ]]; then printf '%s' "${ROOT_DIR}/$1"
+  else printf '%s' "${PARENT_DIR}/$1"; fi
+}
+NINFER_STACK="$(resolve_stack ninfer-stack)"
+GGUF_STACK="$(resolve_stack gguf-stack)"
 MODEL_ROUTER="${ROOT_DIR}"
 
-NINFER_FORK="${NINFER_FORK:-${STACKS_DIR}/../ThirdParty/ninfer-4090}"
+NINFER_FORK="${NINFER_FORK:-${PARENT_DIR}/../ThirdParty/ninfer-4090}"
 
 ROUTER_PORT="${NINFER_ROUTER_PORT:-18089}"
 BACKEND_PORT="${NINFER_BACKEND_PORT:-8080}"

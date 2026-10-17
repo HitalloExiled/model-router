@@ -1,0 +1,6 @@
+[submodule "ninfer-stack"]
+	path = ninfer-stack
+	url = git@github.com:HitalloExiled/ninfer-stack.git
+[submodule "gguf-stack"]
+	path = gguf-stack
+	url = git@github.com:HitalloExiled/gguf-stack.git

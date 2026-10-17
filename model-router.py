@@ -16,7 +16,7 @@ boots the wanted one (~60s cold start); after IDLE_SEC seconds without
 requests the backend is stopped to free VRAM.
 
 Env:
-  NINFER_ROUTER_PORT / NINFER_BACKEND_PORT / NINFER_ROUTER_IDLE_SEC (default 900)
+  MODEL_ROUTER_PORT / NINFER_BACKEND_PORT / MODEL_ROUTER_IDLE_SEC (default 900)
   NINFER_MODEL_DIR / NINFER_DOCKER_IMAGE (forwarded to serve.sh)
 """
 import http.client
@@ -72,9 +72,9 @@ GGUF_FILES = {
 # mount namespace with a private /tmp, which would hide the log from shells.
 LOG_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "ninfer")
 BOOT_LOG = os.path.join(LOG_DIR, "ninfer-backend-boot.log")
-ROUTER_PORT = int(os.environ.get("NINFER_ROUTER_PORT", "18089"))
+ROUTER_PORT = int(os.environ.get("MODEL_ROUTER_PORT", "18089"))
 BACKEND_PORT = int(os.environ.get("NINFER_BACKEND_PORT", "8080"))
-IDLE_SEC = int(os.environ.get("NINFER_ROUTER_IDLE_SEC", "900"))
+IDLE_SEC = int(os.environ.get("MODEL_ROUTER_IDLE_SEC", "900"))
 BOOT_TIMEOUT = 420
 
 PROFILES = {"balanced", "max", "c1", "ultra", "vision",
@@ -410,7 +410,7 @@ MAX_RETRIES = 3
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "ninfer-router"
+    server_version = "model-router"
 
     def _send(self, status, body, ctype="application/json"):
         data = body if isinstance(body, bytes) else body.encode()

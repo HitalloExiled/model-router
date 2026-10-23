@@ -18,7 +18,9 @@ requests the backend is stopped to free VRAM.
 Env:
   MODEL_ROUTER_PORT / NINFER_BACKEND_PORT / MODEL_ROUTER_IDLE_SEC (default 900)
   NINFER_MODEL_DIR / NINFER_DOCKER_IMAGE (forwarded to serve.sh)
+  MODEL_ROUTER_DIGEST=1 / MODEL_ROUTER_DUMP=<dir> (prefix-cache forensics)
 """
+import hashlib
 import http.client
 import json
 import os
@@ -290,6 +292,39 @@ def has_media(decoded):
     return False
 
 
+def message_digest(msg):
+    """Short stable hash of one chat message, tool calls included."""
+    raw = json.dumps(msg, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(raw.encode()).hexdigest()[:8]
+
+
+def debug_prompt(decoded, body):
+    """Prefix-cache forensics (opt-in via env).
+
+    llama.cpp only reuses a prompt up to the first token that differs from the
+    previous one, so a single message that changes early in the list costs a
+    full re-prefill of the whole history (tens of seconds at 100K+ tokens).
+    One hash per message makes that first difference obvious in the log;
+    MODEL_ROUTER_DUMP=<dir> keeps whole bodies for an exact offline diff.
+    """
+    dump = os.environ.get("MODEL_ROUTER_DUMP")
+    if not os.environ.get("MODEL_ROUTER_DIGEST") and not dump:
+        return
+    msgs = decoded.get("messages") or []
+    head = " ".join(f"{i}={message_digest(m)}" for i, m in enumerate(msgs))
+    log(f"prompt n_msgs={len(msgs)} "
+        f"n_tools={len(decoded.get('tools') or [])} "
+        f"bytes={len(body or b'')} digests {head}")
+    if dump:
+        try:
+            os.makedirs(dump, exist_ok=True)
+            path = os.path.join(dump, f"{time.time_ns() // 1000000}.json")
+            with open(path, "wb") as f:
+                f.write(body if isinstance(body, bytes) else body.encode())
+        except Exception as e:  # diagnostics must never break a request
+            log(f"prompt dump failed: {e}")
+
+
 def normalize_chat_body(path, body):
     """Return (profile, new_body, log_note, want_mmproj) for a chat request.
 
@@ -473,6 +508,7 @@ class Handler(BaseHTTPRequestHandler):
                     f"max_tokens={decoded.get('max_tokens', '<absent>')} "
                     f"stream={decoded.get('stream', False)} -> {profile} "
                     f"mmproj={want_mmproj}")
+                debug_prompt(decoded, body)
             except Exception:
                 profile = None
                 want_mmproj = False

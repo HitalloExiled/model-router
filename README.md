@@ -25,6 +25,11 @@ injected only on GGUF profiles — `ninfer-serve` has no budget field, so its
 tiers stay prompt-only. The llama.cpp image is pinned to
 `server-cuda-b11854`; override with `NINFER_LLAMA_IMAGE`.
 
+The client catalog (`~/.config/opencode/opencode.jsonc`) must list all six
+tiers per model (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`); a tier
+missing there is unreachable from the UI even though the router supports it.
+The catalog default (no variant selected) is `low`.
+
 The backend stacks are git submodules of this repo:
 
 - `ninfer-stack/` — NInfer `.ninfer` serving (`serve.sh`, `switch.sh`)

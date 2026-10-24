@@ -27,6 +27,10 @@ Guidance for coding agents working in this repository.
   to ninfer profiles; gate on `GGUF_FILES`.
 - `/v1/messages` uses `chat_template_kwargs` + `thinking.budget_tokens`;
   an explicit client `thinking` block wins.
+- The client catalog (`~/.config/opencode/opencode.jsonc`, v2 `variants`
+  array) must list all six tiers per model. A tier missing there is
+  unreachable from the UI even though the router supports it. Its default
+  (no variant selected) is `low`.
 
 ## Backend notes
 

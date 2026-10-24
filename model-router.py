@@ -56,8 +56,9 @@ PROFILE_MODELS = {"vision": VISION_FILE}
 IMAGE = os.environ.get("NINFER_DOCKER_IMAGE", "ninfer-4090:sm89")
 # llama-server stack (GGUF pilot): second image + artifacts. Flags live in
 # scripts/serve-llama.sh; the router only selects profile -> argv here.
-LLAMA_IMAGE = os.environ.get("NINFER_LLAMA_IMAGE",
-                             "ghcr.io/ggml-org/llama.cpp:server-cuda")
+LLAMA_IMAGE = os.environ.get(
+    "NINFER_LLAMA_IMAGE",
+    "ghcr.io/ggml-org/llama.cpp:server-cuda-b11854")
 GGUF_DIR = os.environ.get(
     "NINFER_GGUF_DIR", os.path.join(stack_dir("gguf-stack"), "models"))
 GGUF_FILES = {
@@ -222,7 +223,24 @@ def start_backend(profile, want_mmproj=False):
     return False
 
 
-EFFORT_SUFFIXES = ("none", "low", "medium", "high", "xhigh")
+EFFORT_SUFFIXES = ("none", "low", "medium", "high", "xhigh", "minimal")
+
+# Client-facing tier -> (template reasoning_effort, thinking budget).
+# The Qwen3.8 template only accepts xhigh|medium|low; "medium" adds no
+# instruction at all, so low/medium are distinguished by the hard budget
+# instead of a prompt hint the model ignores. high maps to xhigh (the
+# template rejects "high"); xhigh stays unbounded. minimal is an OpenAI
+# alias for low. Budgets are per thinking block and only injected for
+# llama.cpp backends (GGUF_FILES): ninfer-serve has no budget field.
+EFFORT_POLICY = {
+    "none": ("none", None),
+    "low": ("medium", 512),
+    "medium": ("medium", 2048),
+    "high": ("xhigh", 8192),
+    "xhigh": ("xhigh", None),
+}
+EFFORT_ALIASES = {"minimal": "low"}
+BUDGET_KEYS = ("reasoning_budget_tokens", "thinking_budget_tokens")
 
 
 def parse_model(model):
@@ -234,7 +252,8 @@ def parse_model(model):
     """
     effort = None
     base = model if isinstance(model, str) else ""
-    for suffix in ("-xhigh", "-high", "-medium", "-low", "-none"):
+    for suffix in ("-xhigh", "-high", "-medium", "-low", "-none",
+                   "-minimal"):
         if base.endswith(suffix):
             effort = suffix[1:]
             base = base[: -len(suffix)]
@@ -325,22 +344,14 @@ def debug_prompt(decoded, body):
             log(f"prompt dump failed: {e}")
 
 
-def normalize_chat_body(path, body):
-    """Return (profile, new_body, log_note, want_mmproj) for a chat request.
+def route_request(decoded):
+    """Return (profile, suffix_effort, want_mmproj, notes) for a request.
 
-    - Routes the profile from the model name.
-    - Fills reasoning_effort from the -effort name suffix when absent.
-    - Drops non-none effort on 35B vision: that template supports thinking
-      on/off only; low/medium/xhigh 400 (reasoning_effort_not_supported).
-    Explicit client values always win except on 35B vision, where only none
-    survives.
-    - Media on a GGUF tier wants mmproj on that SAME tier (lazy upgrade),
-      not a tier switch. Media on ninfer text forces 35B vision.
+    Media on a GGUF tier wants mmproj on that SAME tier (lazy upgrade), not a
+    tier switch. Media on ninfer text forces 35B vision.
     """
-    decoded = json.loads(body or b"{}")
     profile, suffix_effort = parse_model(decoded.get("model"))
     notes = []
-    modified = False
     want_mmproj = profile == "gguf-vision"
     if has_media(decoded):
         if profile in GGUF_ALL:
@@ -354,20 +365,198 @@ def normalize_chat_body(path, body):
             # vision_disabled.
             profile = "vision"
             notes.append("media forces vision")
-    if (suffix_effort and "reasoning_effort" not in decoded
-            and path.startswith("/v1/chat/completions")):
-        decoded["reasoning_effort"] = suffix_effort
-        modified = True
-        notes.append(f"injected {suffix_effort}")
-    if (profile == "vision"
-            and decoded.get("reasoning_effort") not in (None, "none")):
-        notes.append(f"vision dropped {decoded.pop('reasoning_effort')}")
-        modified = True
+    return profile, suffix_effort, want_mmproj, notes
+
+
+def resolve_effort(decoded, suffix_effort):
+    """Return (canonical tier, origin) from body, kwargs, or model suffix."""
+    effort = decoded.get("reasoning_effort")
+    origin = "client"
+    if not isinstance(effort, str) or not effort.strip():
+        ctk = decoded.get("chat_template_kwargs")
+        effort = ctk.get("reasoning_effort") if isinstance(ctk, dict) else None
+        origin = "client-kwargs"
+    if not isinstance(effort, str) or not effort.strip():
+        effort = suffix_effort
+        origin = "suffix"
+    if not isinstance(effort, str) or not effort.strip():
+        return None, None
+    effort = effort.strip().lower()
+    return EFFORT_ALIASES.get(effort, effort), origin
+
+
+def client_thinking_mode(decoded, path):
+    """'enabled'/'disabled' when the client set thinking explicitly."""
+    if path.startswith("/v1/messages"):
+        thinking = decoded.get("thinking")
+        if isinstance(thinking, dict):
+            t = thinking.get("type")
+            if t in ("enabled", "disabled"):
+                return t
+    ctk = decoded.get("chat_template_kwargs")
+    if isinstance(ctk, dict):
+        value = ctk.get("enable_thinking")
+        if value is False or value == "false":
+            return "disabled"
+        if value is True or value == "true":
+            return "enabled"
+    return None
+
+
+def has_explicit_budget(decoded, path):
+    if any(k in decoded for k in BUDGET_KEYS):
+        return True
+    if path.startswith("/v1/messages"):
+        thinking = decoded.get("thinking")
+        if (isinstance(thinking, dict)
+                and thinking.get("type") == "enabled"
+                and "budget_tokens" in thinking):
+            return True
+        extra = decoded.get("extra_params")
+        if isinstance(extra, dict) and any(k in extra for k in BUDGET_KEYS):
+            return True
+    return False
+
+
+def apply_effort_policy(decoded, path, effort, budget_allowed, meta, notes):
+    """Rewrite one request to the tier's template hint + hard budget.
+
+    Explicit client thinking wins: a disabled thinking block is never
+    re-enabled, and an explicit budget is never overwritten. The budget is
+    only injected for llama.cpp backends; ninfer has no equivalent field.
+    """
+    template, budget = EFFORT_POLICY[effort]
+    meta["template"] = template
+    mode = client_thinking_mode(decoded, path)
+    if mode == "disabled":
+        notes.append("thinking disabled by client")
+        return False
+    if effort == "none":
+        if mode == "enabled":
+            notes.append("thinking enabled by client")
+            return False
+        if path.startswith("/v1/messages"):
+            ctk = decoded.get("chat_template_kwargs")
+            if not isinstance(ctk, dict):
+                ctk = {}
+                decoded["chat_template_kwargs"] = ctk
+            ctk["enable_thinking"] = False
+            ctk.pop("reasoning_effort", None)
+            decoded.pop("reasoning_effort", None)
+        else:
+            decoded["reasoning_effort"] = "none"
+        notes.append("effort none")
+        return True
+    if path.startswith("/v1/messages"):
+        ctk = decoded.get("chat_template_kwargs")
+        if not isinstance(ctk, dict):
+            ctk = {}
+            decoded["chat_template_kwargs"] = ctk
+        ctk["enable_thinking"] = True
+        ctk["reasoning_effort"] = template
+        decoded.pop("reasoning_effort", None)
+        notes.append(f"effort {effort}->{template}")
+        if budget is not None and budget_allowed:
+            if has_explicit_budget(decoded, path):
+                meta["budget"] = "client"
+                notes.append("budget kept from client")
+            else:
+                thinking = decoded.get("thinking")
+                if (isinstance(thinking, dict)
+                        and thinking.get("type") == "enabled"):
+                    thinking["budget_tokens"] = budget
+                else:
+                    decoded["thinking"] = {"type": "enabled",
+                                           "budget_tokens": budget}
+                meta["budget"] = budget
+                meta["injected_budget"] = True
+                notes.append(f"budget {budget}")
+        elif budget is not None:
+            notes.append("budget skipped (ninfer)")
+        return True
+    decoded["reasoning_effort"] = template
+    notes.append(f"effort {effort}->{template}")
+    if budget is not None and budget_allowed:
+        if has_explicit_budget(decoded, path):
+            meta["budget"] = "client"
+            notes.append("budget kept from client")
+        else:
+            decoded["reasoning_budget_tokens"] = budget
+            meta["budget"] = budget
+            meta["injected_budget"] = True
+            notes.append(f"budget {budget}")
+    elif budget is not None:
+        notes.append("budget skipped (ninfer)")
+    return True
+
+
+def normalize_chat_body(path, body, route=None, final_profile=None):
+    """Return (profile, new_body, log_note, want_mmproj, meta).
+
+    - Routes the profile from the model name (route_request).
+    - Maps the client tier (body, chat_template_kwargs, or -effort suffix)
+      through EFFORT_POLICY: template hint + hard reasoning budget.
+    - Budgets only reach llama.cpp backends (final_profile in GGUF_FILES);
+      ninfer has no reasoning_budget_tokens equivalent.
+    - Drops non-none effort on 35B vision: that template supports thinking
+      on/off only; low/medium/xhigh 400 (reasoning_effort_not_supported).
+    Explicit client values always win except on 35B vision, where only none
+    survives.
+    """
+    decoded = json.loads(body or b"{}")
+    if route is None:
+        route = route_request(decoded)
+    requested, suffix_effort, want_mmproj, notes = route
+    notes = list(notes)
+    profile = requested if final_profile is None else final_profile
+    modified = False
+    meta = {"effort": None, "origin": None, "template": None,
+            "budget": None, "injected_budget": False}
+    if profile == "vision":
+        if path.startswith("/v1/chat/completions"):
+            if (suffix_effort == "none"
+                    and "reasoning_effort" not in decoded):
+                decoded["reasoning_effort"] = "none"
+                modified = True
+                notes.append("injected none")
+            if decoded.get("reasoning_effort") not in (None, "none"):
+                notes.append(
+                    f"vision dropped {decoded.pop('reasoning_effort')}")
+                modified = True
+            for key in BUDGET_KEYS:
+                if key in decoded:
+                    decoded.pop(key)
+                    modified = True
+                    notes.append(f"vision dropped {key}")
+    else:
+        effort, origin = resolve_effort(decoded, suffix_effort)
+        meta["effort"] = effort
+        meta["origin"] = origin
+        if effort and effort not in EFFORT_POLICY:
+            notes.append(f"ignored unsupported effort {effort}")
+            if path.startswith("/v1/chat/completions"):
+                decoded.pop("reasoning_effort", None)
+            else:
+                ctk = decoded.get("chat_template_kwargs")
+                if isinstance(ctk, dict):
+                    ctk.pop("reasoning_effort", None)
+            modified = True
+            effort = None
+            meta["effort"] = None
+        if effort:
+            if (path.startswith("/v1/messages")
+                    and profile not in GGUF_FILES):
+                notes.append(f"effort {effort} skipped for ninfer")
+            else:
+                changed = apply_effort_policy(
+                    decoded, path, effort,
+                    profile in GGUF_FILES, meta, notes)
+                modified = modified or changed
     # Skip re-serialization when untouched: json round-trips of multi-MB
     # histories are pure router latency (and transient 2x memory).
     new_body = json.dumps(decoded).encode() if modified else (body or b"{}")
     note = (" (" + ", ".join(notes) + ")") if notes else ""
-    return profile, new_body, note, want_mmproj
+    return profile, new_body, note, want_mmproj, meta
 
 
 def same_backend(cur_name, cur_mmproj, profile, want_mmproj):
@@ -485,26 +674,33 @@ class Handler(BaseHTTPRequestHandler):
                 self.path.startswith("/v1/messages"):
             try:
                 decoded = json.loads(body or b"{}")
-                if self.path.startswith("/v1/chat/completions"):
-                    profile, body, note, want_mmproj = \
-                        normalize_chat_body(self.path, body)
-                    decoded = json.loads(body)
-                else:
-                    profile = parse_model(decoded.get("model"))[0]
-                    want_mmproj = False
-                    note = ""
+                route = route_request(decoded)
+                requested, _suffix, want_mmproj, route_notes = route
                 # Reuse the running backend when it can serve: a switch wipes
                 # the prefix cache (full re-prefill). Estimate prompt tokens
                 # conservatively from body bytes; overestimate switches more.
                 need_vision = has_media(decoded)
                 est = len(body) / 3.5 if body else 0
-                reused = effective_profile(profile, state["profile"], est,
+                reused = effective_profile(requested, state["profile"], est,
                                            need_vision)
-                if reused != profile:
+                profile = reused
+                note = (" (" + ", ".join(route_notes) + ")") \
+                    if route_notes else ""
+                if reused != requested:
                     note += f" (reuse {reused}, fits)"
-                    profile = reused
+                _, body, norm_note, norm_mmproj, meta = normalize_chat_body(
+                    self.path, body, route=route, final_profile=profile)
+                want_mmproj = want_mmproj or norm_mmproj
+                if need_vision and profile in GGUF_ALL:
+                    want_mmproj = True
+                note += norm_note
+                decoded = json.loads(body)
                 log(f"chat model={decoded.get('model')} "
-                    f"reasoning_effort={decoded.get('reasoning_effort', '<absent>')}{note} "
+                    f"reasoning_effort={decoded.get('reasoning_effort', '<absent>')} "
+                    f"effort={meta.get('effort') or '<absent>'} "
+                    f"template={meta.get('template') or '<absent>'} "
+                    f"budget={meta.get('budget') if meta.get('budget') is not None else '<absent>'} "
+                    f"origin={meta.get('origin') or '<absent>'}{note} "
                     f"max_tokens={decoded.get('max_tokens', '<absent>')} "
                     f"stream={decoded.get('stream', False)} -> {profile} "
                     f"mmproj={want_mmproj}")

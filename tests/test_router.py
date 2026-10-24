@@ -1,8 +1,9 @@
 """Offline unit tests for the model-router request handling.
 
 Covers parse_model (model name -> profile + effort), normalize_chat_body
-(effort injection, vision normalization, media forcing) and
-effective_profile (backend reuse). No GPU, docker, or network needed.
+(effort policy, budgets, vision normalization, media forcing),
+/v1/messages effort injection and effective_profile (backend reuse).
+No GPU, docker, or network needed.
 """
 import importlib.util
 import json
@@ -45,6 +46,7 @@ def main():
         "qwen3.8-27b-256k-xhigh": ("ultra", "xhigh"),
         "qwen3.8-27b-256k": ("ultra", None),
         "qwen3.8-27b-128k-medium": ("balanced", "medium"),
+        "qwen3.8-27b-128k-minimal": ("balanced", "minimal"),
         "qwen3.6-35b-vision": ("vision", None),
         "qwen3.6-35b-vision-low": ("vision", "low"),
         "qwen3.8-gguf-speed": ("gguf-speed", None),
@@ -59,30 +61,104 @@ def main():
     P = "/v1/chat/completions"
     img = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
 
-    def norm(model, content="hi", effort=None):
+    def norm(model, content="hi", effort=None, extra=None,
+             final_profile=None, path=P):
         d = {"model": model, "messages": [{"role": "user", "content": content}]}
         if effort:
             d["reasoning_effort"] = effort
-        prof, new_body, _note, _mm = nr.normalize_chat_body(P, json.dumps(d).encode())
-        return prof, json.loads(new_body).get("reasoning_effort", "<ABSENT>")
+        if extra:
+            d.update(extra)
+        prof, new_body, _note, _mm, meta = nr.normalize_chat_body(
+            path, json.dumps(d).encode(), final_profile=final_profile)
+        return prof, json.loads(new_body), meta
 
-    for label, model, content, sent, want in [
-        ("vision-suffix-dropped", "qwen3.6-35b-vision-low", "hi", None,
-         ("vision", "<ABSENT>")),
-        ("vision-explicit-low-dropped", "qwen3.6-35b-vision", "hi", "low",
-         ("vision", "<ABSENT>")),
-        ("vision-none-kept", "qwen3.6-35b-vision", "hi", "none",
-         ("vision", "none")),
-        ("balanced-inject-low", "qwen3.8-27b-128k-low", "hi", None,
-         ("balanced", "low")),
-        ("explicit-wins", "qwen3.8-27b-128k-low", "hi", "medium",
-         ("balanced", "medium")),
-        ("media-forces-vision", "qwen3.8-27b-128k", [img], None,
-         ("vision", "<ABSENT>")),
-        ("plain-untouched", "qwen3.8-27b-256k", "hi", None,
-         ("ultra", "<ABSENT>")),
+    def chat(model, content="hi", effort=None, extra=None,
+             final_profile=None):
+        prof, out, _meta = norm(model, content, effort, extra, final_profile)
+        return (prof,
+                out.get("reasoning_effort", "<ABSENT>"),
+                out.get("reasoning_budget_tokens", "<ABSENT>"))
+
+    for label, args, want in [
+        ("vision-suffix-dropped", ("qwen3.6-35b-vision-low",),
+         ("vision", "<ABSENT>", "<ABSENT>")),
+        ("vision-explicit-low-dropped", ("qwen3.6-35b-vision", "hi", "low"),
+         ("vision", "<ABSENT>", "<ABSENT>")),
+        ("vision-none-kept", ("qwen3.6-35b-vision", "hi", "none"),
+         ("vision", "none", "<ABSENT>")),
+        ("vision-budget-dropped",
+         ("qwen3.6-35b-vision", "hi", "low",
+          {"reasoning_budget_tokens": 4096}),
+         ("vision", "<ABSENT>", "<ABSENT>")),
+        ("low-is-budgeted", ("qwen3.8-gguf-max-low",),
+         ("gguf-max", "medium", 512)),
+        ("medium-budget", ("qwen3.8-gguf-max-medium",),
+         ("gguf-max", "medium", 2048)),
+        ("high-maps-xhigh", ("qwen3.8-gguf-max-high",),
+         ("gguf-max", "xhigh", 8192)),
+        ("minimal-alias-low", ("qwen3.8-gguf-max-minimal",),
+         ("gguf-max", "medium", 512)),
+        ("xhigh-unbounded", ("qwen3.8-gguf-max-xhigh",),
+         ("gguf-max", "xhigh", "<ABSENT>")),
+        ("explicit-wins", ("qwen3.8-gguf-max-low", "hi", "medium"),
+         ("gguf-max", "medium", 2048)),
+        ("explicit-budget-wins",
+         ("qwen3.8-gguf-max-low", "hi", None,
+          {"reasoning_budget_tokens": 4096}),
+         ("gguf-max", "medium", 4096)),
+        ("client-thinking-off",
+         ("qwen3.8-gguf-max-low", "hi", None,
+          {"chat_template_kwargs": {"enable_thinking": False}}),
+         ("gguf-max", "<ABSENT>", "<ABSENT>")),
+        ("unsupported-dropped", ("qwen3.8-gguf-max", "hi", "max"),
+         ("gguf-max", "<ABSENT>", "<ABSENT>")),
+        ("ninfer-no-budget", ("qwen3.8-27b-128k-low",),
+         ("balanced", "medium", "<ABSENT>")),
+        ("reuse-ninfer-no-budget",
+         ("qwen3.8-gguf-max-low", "hi", None, None, "balanced"),
+         ("balanced", "medium", "<ABSENT>")),
+        ("media-forces-vision", ("qwen3.8-27b-128k", [img]),
+         ("vision", "<ABSENT>", "<ABSENT>")),
+        ("plain-untouched", ("qwen3.8-27b-256k",),
+         ("ultra", "<ABSENT>", "<ABSENT>")),
     ]:
-        check(f"norm:{label}", norm(model, content, sent), want)
+        check(f"norm:{label}", chat(*args), want)
+
+    M = "/v1/messages"
+
+    def messages(model, effort=None, extra=None, final_profile=None):
+        prof, out, meta = norm(model, effort=effort, extra=extra,
+                               final_profile=final_profile, path=M)
+        ctk = out.get("chat_template_kwargs") or {}
+        thinking = out.get("thinking") or {}
+        return (prof,
+                ctk.get("reasoning_effort", "<ABSENT>"),
+                ctk.get("enable_thinking", "<ABSENT>"),
+                thinking.get("budget_tokens", "<ABSENT>"),
+                meta.get("injected_budget", False))
+
+    for label, args, want in [
+        ("gguf-low", ("qwen3.8-gguf-max-low",),
+         ("gguf-max", "medium", True, 512, True)),
+        ("gguf-high", ("qwen3.8-gguf-max-high",),
+         ("gguf-max", "xhigh", True, 8192, True)),
+        ("gguf-none", ("qwen3.8-gguf-max-none",),
+         ("gguf-max", "<ABSENT>", False, "<ABSENT>", False)),
+        ("explicit-budget",
+         ("qwen3.8-gguf-max-low", None,
+          {"thinking": {"type": "enabled", "budget_tokens": 4096}}),
+         ("gguf-max", "medium", True, 4096, False)),
+        ("thinking-disabled",
+         ("qwen3.8-gguf-max-low", None,
+          {"thinking": {"type": "disabled"}}),
+         ("gguf-max", "<ABSENT>", "<ABSENT>", "<ABSENT>", False)),
+        ("ninfer-skipped", ("qwen3.8-27b-128k-low",),
+         ("balanced", "<ABSENT>", "<ABSENT>", "<ABSENT>", False)),
+        ("reuse-ninfer-skipped",
+         ("qwen3.8-gguf-max-low", None, None, "balanced"),
+         ("balanced", "<ABSENT>", "<ABSENT>", "<ABSENT>", False)),
+    ]:
+        check(f"messages:{label}", messages(*args), want)
 
     E = nr.effective_profile
     for label, w, c, e, m, want in [

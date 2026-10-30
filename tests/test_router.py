@@ -58,6 +58,8 @@ def main():
         "bonsai-2-27b-max": ("bonsai-max", None),
         "bonsai-2-27b-duo256": ("bonsai-duo256", None),
         "bonsai-2-27b-trio256-medium": ("bonsai-trio256", "medium"),
+        "bonsai-2-27b-trio200": ("bonsai-trio200", None),
+        "bonsai-2-27b-trio200-low": ("bonsai-trio200", "low"),
         "bonsai-2-27b-quad128-low": ("bonsai-quad128", "low"),
         "bonsai-2-27b-penta128": ("bonsai-penta128", None),
         "bonsai-2-27b-hexa128-low": ("bonsai-hexa128", "low"),
@@ -225,6 +227,17 @@ def main():
          False, "bonsai-hexa128"),
         ("hexa-yields-200k-trio", "bonsai-trio256", "bonsai-hexa128", 200000,
          False, "bonsai-trio256"),
+        # trio200 trades 56K of window per slot for ~4 GiB of VRAM headroom.
+        # It still absorbs small trio256 requests, but a ~200K prompt needs
+        # the full-window tier.
+        ("trio200-reused-by-trio256", "bonsai-trio200", "bonsai-trio256", 1000,
+         False, "bonsai-trio256"),
+        ("trio200-holds-small-trio256", "bonsai-trio256", "bonsai-trio200",
+         1000, False, "bonsai-trio200"),
+        ("trio200-yields-200k", "bonsai-trio256", "bonsai-trio200", 200000,
+         False, "bonsai-trio256"),
+        ("duo256-not-swallow-trio200", "bonsai-trio200", "bonsai-duo256",
+         1000, False, "bonsai-trio200"),
         # Reuse never crosses model families: a compliant slot count is not
         # permission to answer a Qwen request with Bonsai weights.
         ("family-switch-gguf-to-bonsai", "bonsai-quad128", "gguf-duo128", 1000,
@@ -272,6 +285,8 @@ def main():
          "bonsai-quad128"),
         ("bonsai-alias-trio", "--alias bonsai-trio256 -c 786432 --parallel 3",
          "bonsai-trio256"),
+        ("bonsai-alias-trio200", "--alias bonsai-trio200 -c 614400 --parallel 3",
+         "bonsai-trio200"),
         ("bonsai-alias-duo256", "--alias bonsai-duo256 -c 524288 --parallel 2",
          "bonsai-duo256"),
         ("bonsai-alias-hexa", "--alias bonsai-hexa128 -c 786432 --parallel 6",
@@ -284,6 +299,8 @@ def main():
          "--parallel 5 -c 655360", "bonsai-penta128"),
         ("bonsai-no-alias-trio", "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf "
          "--parallel 3 -c 786432", "bonsai-trio256"),
+        ("bonsai-no-alias-trio200", "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf "
+         "--parallel 3 -c 614400", "bonsai-trio200"),
         ("bonsai-no-alias-duo256", "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf "
          "--parallel 2 -c 524288", "bonsai-duo256"),
         ("bonsai-no-alias-octo",

@@ -82,6 +82,7 @@ BONSAI_FILES = {
     "bonsai-max": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
     "bonsai-duo256": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
     "bonsai-trio256": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+    "bonsai-trio200": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
     "bonsai-duo128": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
     "bonsai-quad128": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
     "bonsai-penta128": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
@@ -101,7 +102,8 @@ BOOT_TIMEOUT = 420
 PROFILES = {"balanced", "max", "c1", "ultra", "vision",
             "gguf-speed", "gguf-range", "gguf-max", "gguf-duo", "gguf-duo128",
             "gguf-quad", "gguf-vision", "gguf-single192",
-            "bonsai-max", "bonsai-duo256", "bonsai-trio256", "bonsai-duo128",
+            "bonsai-max", "bonsai-duo256", "bonsai-trio256", "bonsai-trio200",
+            "bonsai-duo128",
             "bonsai-quad128", "bonsai-penta128", "bonsai-hexa128",
             "bonsai-octo64", "bonsai-vision"}
 # Per-slot window (a client sees one slot, not the whole pool).
@@ -112,7 +114,8 @@ PROFILE_WINDOWS = {"c1": 65536, "balanced": 131072, "max": 196608,
                    "gguf-duo128": 131072, "gguf-quad": 65536,
                    "gguf-vision": 65536, "gguf-single192": 196608,
                    "bonsai-max": 262144, "bonsai-duo256": 262144,
-                   "bonsai-trio256": 262144, "bonsai-duo128": 131072,
+                   "bonsai-trio256": 262144, "bonsai-trio200": 204800,
+                   "bonsai-duo128": 131072,
                    "bonsai-quad128": 131072, "bonsai-penta128": 131072,
                    "bonsai-hexa128": 131072, "bonsai-octo64": 65536,
                    "bonsai-vision": 65536}
@@ -123,6 +126,7 @@ PROFILE_SLOTS = {"c1": 1, "balanced": 1, "max": 1, "ultra": 1, "vision": 1,
                  "gguf-duo": 2, "gguf-duo128": 2, "gguf-quad": 4,
                  "gguf-vision": 1, "gguf-single192": 1,
                  "bonsai-max": 1, "bonsai-duo256": 2, "bonsai-trio256": 3,
+                 "bonsai-trio200": 3,
                  "bonsai-duo128": 2, "bonsai-quad128": 4,
                  "bonsai-penta128": 5, "bonsai-hexa128": 6,
                  "bonsai-octo64": 8, "bonsai-vision": 1}
@@ -131,14 +135,16 @@ PROFILE_SLOTS = {"c1": 1, "balanced": 1, "max": 1, "ultra": 1, "vision": 1,
 VISION_CAPABLE = {"vision", "gguf-speed", "gguf-range", "gguf-max",
                   "gguf-duo", "gguf-duo128", "gguf-quad", "gguf-vision",
                   "bonsai-max", "bonsai-duo256", "bonsai-trio256",
-                  "bonsai-duo128", "bonsai-quad128", "bonsai-penta128",
-                  "bonsai-hexa128", "bonsai-octo64", "bonsai-vision"}
+                  "bonsai-trio200", "bonsai-duo128", "bonsai-quad128",
+                  "bonsai-penta128", "bonsai-hexa128", "bonsai-octo64",
+                  "bonsai-vision"}
 GGUF_ALL = {"gguf-speed", "gguf-range", "gguf-max",
             "gguf-duo", "gguf-duo128", "gguf-quad", "gguf-vision",
             "gguf-single192"}
 BONSAI_ALL = {"bonsai-max", "bonsai-duo256", "bonsai-trio256",
-              "bonsai-duo128", "bonsai-quad128", "bonsai-penta128",
-              "bonsai-hexa128", "bonsai-octo64", "bonsai-vision"}
+              "bonsai-trio200", "bonsai-duo128", "bonsai-quad128",
+              "bonsai-penta128", "bonsai-hexa128", "bonsai-octo64",
+              "bonsai-vision"}
 # Everything served by a llama.cpp-family image: budgets apply here.
 LLAMA_ALL = GGUF_ALL | BONSAI_ALL
 # Reuse the resident backend only when it has at least the requested slots.
@@ -375,8 +381,8 @@ def parse_model(model):
     if "bonsai" in base:
         # Ternary Bonsai 2 27B tiers. Match the tier word, not the full id:
         # the client catalog uses bonsai-2-27b-<tier>.
-        for tier in ("trio256", "duo256", "hexa128", "penta128", "octo64",
-                     "quad128", "duo128", "vision", "max"):
+        for tier in ("trio256", "trio200", "duo256", "hexa128", "penta128",
+                     "octo64", "quad128", "duo128", "vision", "max"):
             if tier in base:
                 return f"bonsai-{tier}", effort
         return "bonsai-max", effort
@@ -758,6 +764,9 @@ STATIC_MODELS = {
         {"id": "bonsai-2-27b-trio256", "object": "model", "owned_by": "prism",
          "name": "bonsai-2-27b-trio256", "context_window": 262144,
          "max_model_len": 262144, "modalities": {"vision": False}},
+        {"id": "bonsai-2-27b-trio200", "object": "model", "owned_by": "prism",
+         "name": "bonsai-2-27b-trio200", "context_window": 204800,
+         "max_model_len": 204800, "modalities": {"vision": False}},
         {"id": "bonsai-2-27b-duo128", "object": "model", "owned_by": "prism",
          "name": "bonsai-2-27b-duo128", "context_window": 131072,
          "max_model_len": 131072, "modalities": {"vision": False}},
@@ -1007,7 +1016,9 @@ def infer_profile(args):
         if "--parallel 5" in args:
             return "bonsai-penta128"
         if "--parallel 3" in args:
-            return "bonsai-trio256"
+            return ("bonsai-trio200"
+                    if "-c 614400" in args or "--ctx-size 614400" in args
+                    else "bonsai-trio256")
         if "--parallel 2" in args:
             return ("bonsai-duo256"
                     if "-c 524288" in args or "--ctx-size 524288" in args

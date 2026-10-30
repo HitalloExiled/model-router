@@ -254,7 +254,8 @@ public static class Effort
             capped = true;
             notes.Add($"budget {budget}");
         }
-        if (capped)
+        // An explicit client message still wins (mirrors python setdefault).
+        if (capped && !decoded.ContainsKey("reasoning_budget_message"))
             decoded["reasoning_budget_message"] = BudgetMessage;
         return true;
     }

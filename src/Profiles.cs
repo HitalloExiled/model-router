@@ -61,6 +61,10 @@ public static class Profiles
         NInferAll.Contains(profile) ? "ninfer"
         : null;
 
+    // Full set of known profiles (ninfer + gguf + bonsai), mirrors python PROFILES.
+    public static readonly IReadOnlyCollection<string> ProxiesSet =
+        new HashSet<string>(NInferAll).Union(GgufAll).Union(BonsaiAll).ToImmutableArray();
+
     static Profiles()
     {
         var gguf = GgufAll;

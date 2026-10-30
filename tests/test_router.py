@@ -394,6 +394,30 @@ def main():
         ("chat-extra-params", {"extra_params": {"reasoning_budget_tokens": 1}}, "/v1/chat/completions", False),
     ]:
         check(f"budget:{label}", B(d, path), want)
+
+    # ---- apply_effort_policy: injected budget carries a transition message ----
+    P = nr.apply_effort_policy
+    d, meta, notes = {"model": "x"}, {}, []
+    P(d, "/v1/chat/completions", "low", True, meta, notes)
+    check("effortpol:budget", d.get("reasoning_budget_tokens"), 512)
+    check("effortpol:budget-msg", d.get("reasoning_budget_message"), nr.BUDGET_MESSAGE)
+    check("effortpol:budget-meta", meta.get("injected_budget"), True)
+
+    d, meta, notes = {"reasoning_budget_tokens": 999,
+                      "reasoning_budget_message": "mine"}, {}, []
+    P(d, "/v1/chat/completions", "low", True, meta, notes)
+    check("effortpol:client-budget-kept", d.get("reasoning_budget_tokens"), 999)
+    check("effortpol:client-budget-no-msg", d.get("reasoning_budget_message"), "mine")
+
+    d, meta, notes = {"reasoning_budget_tokens": 999}, {}, []
+    P(d, "/v1/chat/completions", "low", True, meta, notes)
+    check("effortpol:client-budget-kept2", d.get("reasoning_budget_tokens"), 999)
+    check("effortpol:client-budget-msg", d.get("reasoning_budget_message"), nr.BUDGET_MESSAGE)
+
+    d, meta, notes = {}, {}, []
+    P(d, "/v1/chat/completions", "xhigh", True, meta, notes)
+    check("effortpol:no-budget", "reasoning_budget_tokens" in d, False)
+    check("effortpol:no-budget-msg", "reasoning_budget_message" in d, False)
     
     # ---- route_request: direct coverage of all branches ----
     Q = nr.route_request

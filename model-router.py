@@ -362,6 +362,11 @@ EFFORT_POLICY = {
 EFFORT_ALIASES = {"minimal": "low"}
 BUDGET_KEYS = ("reasoning_budget_tokens", "thinking_budget_tokens")
 
+# Injected right before the forced end-of-thinking tag when the budget runs
+# out. Without it llama.cpp forces a bare </think> mid-sentence; Bonsai then
+# frequently emits EOS and the turn ends with no answer at all.
+BUDGET_MESSAGE = "\n\nOkay, I have thought enough. Time to write the final answer."
+
 
 def parse_model(model):
     """Split '<base>[-effort]' into (profile, effort|None).
@@ -613,6 +618,11 @@ def apply_effort_policy(decoded, path, effort, budget_allowed, meta, notes):
             meta["budget"] = budget
             meta["injected_budget"] = True
             notes.append(f"budget {budget}")
+        # A bare forced </think> lands mid-sentence and the model often
+        # answers with EOS instead of an answer (Bonsai: ~50% of capped
+        # turns in long agentic contexts). Give it a transition first, whoever
+        # set the budget. An explicit client message still wins.
+        decoded.setdefault("reasoning_budget_message", BUDGET_MESSAGE)
     elif budget is not None:
         notes.append("budget skipped (ninfer)")
     return True

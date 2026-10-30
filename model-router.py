@@ -352,6 +352,12 @@ EFFORT_SUFFIXES = ("none", "low", "medium", "high", "xhigh", "minimal")
 # alias for low. Budgets are per thinking block and only injected for
 # llama.cpp backends (GGUF_FILES + BONSAI_FILES): ninfer-serve has no budget
 # field.
+#
+# The GGUF/Qwen side keeps these caps: there the model finishes its thought
+# inside the budget and answers. Bonsai opts out at the call site
+# (family(profile) != "bonsai") -- its thinking runs longer, and the 512 cap
+# cut 63% of turns mid-sentence in an agentic session, which left the answer
+# built on a half-finished line of reasoning.
 EFFORT_POLICY = {
     "none": ("none", None),
     "low": ("medium", 512),
@@ -609,22 +615,24 @@ def apply_effort_policy(decoded, path, effort, budget_allowed, meta, notes):
         return True
     decoded["reasoning_effort"] = template
     notes.append(f"effort {effort}->{template}")
-    if budget is not None and budget_allowed:
-        if has_explicit_budget(decoded, path):
-            meta["budget"] = "client"
-            notes.append("budget kept from client")
-        else:
-            decoded["reasoning_budget_tokens"] = budget
-            meta["budget"] = budget
-            meta["injected_budget"] = True
-            notes.append(f"budget {budget}")
-        # A bare forced </think> lands mid-sentence and the model often
-        # answers with EOS instead of an answer (Bonsai: ~50% of capped
-        # turns in long agentic contexts). Give it a transition first, whoever
-        # set the budget. An explicit client message still wins.
-        decoded.setdefault("reasoning_budget_message", BUDGET_MESSAGE)
+    capped = has_explicit_budget(decoded, path)
+    if capped:
+        meta["budget"] = "client"
+        notes.append("budget kept from client")
+    elif budget is not None and budget_allowed:
+        decoded["reasoning_budget_tokens"] = budget
+        meta["budget"] = budget
+        meta["injected_budget"] = True
+        capped = True
+        notes.append(f"budget {budget}")
     elif budget is not None:
-        notes.append("budget skipped (ninfer)")
+        notes.append("no cap for this backend")
+    # A bare forced </think> lands mid-sentence and the model often answers
+    # with EOS instead of an answer (Bonsai: ~50% of capped turns in long
+    # agentic contexts). Give it a transition first, whoever set the budget.
+    # An explicit client message still wins.
+    if capped:
+        decoded.setdefault("reasoning_budget_message", BUDGET_MESSAGE)
     return True
 
 
@@ -688,7 +696,8 @@ def normalize_chat_body(path, body, route=None, final_profile=None):
             else:
                 changed = apply_effort_policy(
                     decoded, path, effort,
-                    profile in LLAMA_ALL, meta, notes)
+                    profile in LLAMA_ALL and family(profile) != "bonsai",
+                    meta, notes)
                 modified = modified or changed
     # Skip re-serialization when untouched: json round-trips of multi-MB
     # histories are pure router latency (and transient 2x memory).

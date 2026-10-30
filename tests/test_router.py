@@ -133,11 +133,11 @@ def main():
          ("vision", "<ABSENT>", "<ABSENT>")),
         ("plain-untouched", ("qwen3.8-27b-256k",),
          ("ultra", "<ABSENT>", "<ABSENT>")),
-        # Ternary backend must get the same hard budgets as the GGUF one.
-        ("bonsai-low-is-budgeted", ("bonsai-2-27b-quad128-low",),
-         ("bonsai-quad128", "medium", 512)),
+        # Bonsai opts out of the hard budget: the cap truncates its thinking.
+        ("bonsai-low-no-cap", ("bonsai-2-27b-quad128-low",),
+         ("bonsai-quad128", "medium", "<ABSENT>")),
         ("bonsai-high-maps-xhigh", ("bonsai-2-27b-octo64-high",),
-         ("bonsai-octo64", "xhigh", 8192)),
+         ("bonsai-octo64", "xhigh", "<ABSENT>")),
     ]:
         check(f"norm:{label}", chat(*args), want)
 
@@ -395,13 +395,20 @@ def main():
     ]:
         check(f"budget:{label}", B(d, path), want)
 
-    # ---- apply_effort_policy: injected budget carries a transition message ----
+    # ---- apply_effort_policy: caps for llama.cpp, none for uncapped backends,
+    # ---- and a transition message whenever a cap is actually in force ----
     P = nr.apply_effort_policy
     d, meta, notes = {"model": "x"}, {}, []
     P(d, "/v1/chat/completions", "low", True, meta, notes)
     check("effortpol:budget", d.get("reasoning_budget_tokens"), 512)
     check("effortpol:budget-msg", d.get("reasoning_budget_message"), nr.BUDGET_MESSAGE)
     check("effortpol:budget-meta", meta.get("injected_budget"), True)
+
+    for tier in ("low", "medium", "high"):
+        d, meta, notes = {"model": "x"}, {}, []
+        P(d, "/v1/chat/completions", tier, False, meta, notes)
+        check(f"effortpol:no-cap-{tier}", "reasoning_budget_tokens" in d, False)
+        check(f"effortpol:no-cap-msg-{tier}", "reasoning_budget_message" in d, False)
 
     d, meta, notes = {"reasoning_budget_tokens": 999,
                       "reasoning_budget_message": "mine"}, {}, []

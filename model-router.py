@@ -682,23 +682,26 @@ def normalize_chat_body(path, body, route=None, final_profile=None):
 
 
 def same_backend(cur_name, cur_mmproj, profile, want_mmproj):
-    """True when the running backend already satisfies the request exactly.
+    """True when the running backend already satisfies the request.
 
     `state["profile"]` only ever holds the profile *name*; the encoder
-    (mmproj) state lives separately in `state["profile_mmproj"]`. Comparing
-    the two is what stops a media request from restarting the same backend on
-    every call.
+    (mmproj) state lives separately in `state["profile_mmproj"]`.
+
+    A resident encoder is sticky: it serves text requests too. Reboot only to
+    *add* mmproj when media arrives. Toggling it off for text would restart a
+    multi-slot 20+ GiB backend (full re-prefill) just to reclaim 0.6 GiB, and
+    a mixed image/text session would ping-pong on every turn.
     """
-    return cur_name == profile and bool(cur_mmproj) == bool(want_mmproj)
+    return cur_name == profile and (bool(cur_mmproj) or not bool(want_mmproj))
 
 
 def ensure_backend(profile, want_mmproj=False):
     """Must hold `lock`. Returns True when the wanted profile serves."""
     name = state["profile"]
     cur_mmproj = state["profile_mmproj"]
-    # Same profile name AND same encoder state → reuse. Only a changed mmproj
-    # (or a different tier) reboots; otherwise every media request to the same
-    # GGUF tier would stop and reload the backend.
+    # Same profile and (encoder resident or not needed) → reuse. Only a media
+    # request against a text-only backend reboots; the encoder is never
+    # removed just to reclaim memory.
     if same_backend(name, cur_mmproj, profile, want_mmproj) and \
             (backend_container() or backend_healthy()):
         return True

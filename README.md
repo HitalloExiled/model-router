@@ -85,3 +85,8 @@ Reuse is also restricted to the same model family (`ninfer`, `gguf`, `bonsai`):
 a resident Bonsai backend will never answer a `qwen3.8-gguf-*` request just
 because the prompt fits and the slot count is sufficient.
 
+The mmproj encoder is sticky: once a backend has it resident it also serves
+text requests, so a mixed text/image session does not reboot a 20+ GiB
+multi-slot backend (and pay a full re-prefill) on every turn. Only a media
+request against a text-only backend triggers a reboot, to add the encoder.
+

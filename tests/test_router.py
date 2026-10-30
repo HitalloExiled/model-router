@@ -238,14 +238,17 @@ def main():
     ]:
         check(f"reuse:{label}", E(w, c, e, m), want)
 
-    # Encoder (mmproj) state must be tracked separately from the profile name,
-    # or a media request reboots the same GGUF backend on every call.
+    # Encoder (mmproj) state must be tracked separately from the profile name.
+    # It is sticky: once resident it serves text too, so mixed image/text
+    # sessions do not reboot the backend on every turn.
     S = nr.same_backend
     for label, cn, cm, p, wm, want in [
         ("exact-text", "balanced", False, "balanced", False, True),
         ("encoder-added-reboots", "gguf-max", False, "gguf-max", True, False),
         ("encoder-kept-reuses", "gguf-max", True, "gguf-max", True, True),
-        ("encoder-removed-reboots", "gguf-max", True, "gguf-max", False, False),
+        ("encoder-kept-for-text", "gguf-max", True, "gguf-max", False, True),
+        ("bonsai-encoder-kept-for-text", "bonsai-trio256", True,
+         "bonsai-trio256", False, True),
         ("tier-differs", "balanced", False, "ultra", False, False),
         ("nothing-running", None, False, "balanced", False, False),
     ]:

@@ -312,7 +312,140 @@ def main():
         ("empty", "", None),
     ]:
         check(f"adopt:{label}", I(args), want)
-
+    
+    # ---- has_media (directly): every media shape, OpenAI + Anthropic ----
+    H = nr.has_media
+    for label, d, want in [
+        ("img-url", {"messages": [{"content": [img]}]}, True),
+        ("input-image", {"messages": [{"content": [{"type": "input_image"}]}]}, True),
+        ("input-video", {"messages": [{"content": [{"type": "input_video"}]}]}, True),
+        ("video-url", {"messages": [{"content": [{"type": "video_url"}]}]}, True),
+        ("image-type", {"messages": [{"content": [{"type": "image"}]}]}, True),
+        ("source-image", {"messages": [{"content": [{"source": {"media_type": "image/jpeg"}, "type": "doc"}]}]}, True),
+        ("source-audio-false", {"messages": [{"content": [{"source": {"media_type": "audio/mpeg"}}]}]}, False),
+        ("source-missing-false", {"messages": [{"content": [{"source": {}}]}]}, False),
+        ("plain-string", {"messages": [{"content": "hi"}]}, False),
+        ("text-only", {"messages": [{"content": [{"type": "text", "text": "hi"}]}]}, False),
+        ("empty-msgs", {"messages": []}, False),
+        ("no-messages", {}, False),
+        ("non-dict-message", {"messages": ["x"]}, False),
+        ("content-not-list", {"messages": [{"content": {"type": "image_url"}}]}, False),
+        ("non-dict-part", {"messages": [{"content": ["x", 1, {"type": "text"}]}]}, False),
+        ("mixed-text-img", {"messages": [{"content": ["hi", img]}]}, True),
+        ("bad-decoded", {"model": "x"}, False),
+    ]:
+        check(f"media:{label}", H(d), want)
+    
+    # ---- resolve_effort: client > kwargs > suffix precedence + aliases ----
+    R = nr.resolve_effort
+    for label, d, s, want in [
+        ("client-str", {"reasoning_effort": "medium"}, None, ("medium", "client")),
+        ("client-alias", {"reasoning_effort": "minimal"}, None, ("low", "client")),
+        ("client-case", {"reasoning_effort": " XHIGH "}, None, ("xhigh", "client")),
+        ("client-high", {"reasoning_effort": "high"}, None, ("high", "client")),
+        ("client-none", {"reasoning_effort": "none"}, None, ("none", "client")),
+        ("kwargs-wins", {"chat_template_kwargs": {"reasoning_effort": "high"}}, "low", ("high", "client-kwargs")),
+        ("kwargs-alias", {"chat_template_kwargs": {"reasoning_effort": "minimal"}}, None, ("low", "client-kwargs")),
+        ("kwargs-non-dict-falls", {"chat_template_kwargs": "x"}, "low", ("low", "suffix")),
+        ("empty-str-falls", {"reasoning_effort": "   "}, "medium", ("medium", "suffix")),
+        ("empty-str-no-suffix", {}, None, (None, None)),
+        ("non-str-falls", {"reasoning_effort": 1}, "xhigh", ("xhigh", "suffix")),
+        ("suffix-only", {}, "low", ("low", "suffix")),
+        ("suffix-alias", {}, "minimal", ("low", "suffix")),
+        ("suffix-none", {}, "none", ("none", "suffix")),
+        ("suffix-raw", {}, "high", ("high", "suffix")),
+    ]:
+        check(f"effort:{label}", R(d, s), want)
+    
+    # ---- client_thinking_mode: /v1/messages wins over kwargs ----
+    C = nr.client_thinking_mode
+    for label, d, path, want in [
+        ("msg-enabled", {"thinking": {"type": "enabled"}}, "/v1/messages", "enabled"),
+        ("msg-disabled", {"thinking": {"type": "disabled"}}, "/v1/messages", "disabled"),
+        ("msg-other-type", {"thinking": {"type": "auto"}}, "/v1/messages", None),
+        ("msg-none", {}, "/v1/messages", None),
+        ("msg-thinking-str", {"thinking": "enabled"}, "/v1/messages", None),
+        ("ctk-true", {"chat_template_kwargs": {"enable_thinking": True}}, "/v1/chat/completions", "enabled"),
+        ("ctk-false", {"chat_template_kwargs": {"enable_thinking": False}}, "/v1/chat/completions", "disabled"),
+        ("ctk-str-true", {"chat_template_kwargs": {"enable_thinking": "true"}}, "/v1/messages", "enabled"),
+        ("ctk-str-false", {"chat_template_kwargs": {"enable_thinking": "false"}}, "/v1/messages", "disabled"),
+        ("ctk-str-other", {"chat_template_kwargs": {"enable_thinking": "yes"}}, "/v1/messages", None),
+        ("msg-think-wins", {"thinking": {"type": "disabled"}, "chat_template_kwargs": {"enable_thinking": True}}, "/v1/messages", "disabled"),
+        ("chat-kwargs", {"chat_template_kwargs": {"enable_thinking": True}}, "/v1/chat/completions", "enabled"),
+        ("extra-not-read", {"extra_params": {"reasoning_budget_tokens": 1}}, "/v1/messages", None),
+        ("nothing", {}, "/v1/chat/completions", None),
+        ("messages-kwargs-false", {"chat_template_kwargs": {"enable_thinking": False}}, "/v1/messages", "disabled"),
+    ]:
+        check(f"think:{label}", C(d, path), want)
+    
+    # ---- has_explicit_budget: body > messages/thinking > extra_params ----
+    B = nr.has_explicit_budget
+    for label, d, path, want in [
+        ("body-key", {"reasoning_budget_tokens": 4096}, "/v1/chat/completions", True),
+        ("body-alt-key", {"thinking_budget_tokens": 4096}, "/v1/chat/completions", True),
+        ("msg-think-budget", {"thinking": {"type": "enabled", "budget_tokens": 512}}, "/v1/messages", True),
+        ("msg-think-disabled", {"thinking": {"type": "disabled"}}, "/v1/messages", False),
+        ("msg-think-enabled-nob", {"thinking": {"type": "enabled"}}, "/v1/messages", False),
+        ("msg-think-auto-b", {"thinking": {"type": "auto", "budget_tokens": 1}}, "/v1/messages", False),
+        ("msg-extra-params-key", {"extra_params": {"reasoning_budget_tokens": 1}}, "/v1/messages", True),
+        ("msg-extra-params-other", {"extra_params": {"x": 1}}, "/v1/messages", False),
+        ("msg-extra-params-none", {"extra_params": None}, "/v1/messages", False),
+        ("nothing", {}, "/v1/chat/completions", False),
+        ("chat-extra-params", {"extra_params": {"reasoning_budget_tokens": 1}}, "/v1/chat/completions", False),
+    ]:
+        check(f"budget:{label}", B(d, path), want)
+    
+    # ---- route_request: direct coverage of all branches ----
+    Q = nr.route_request
+    for label, d, want in [
+        ("text-plain", {"model": "qwen3.8-27b-128k"}, ("balanced", None, False, [])),
+        ("gguf-vision-media", {"model": "qwen3.8-gguf-vision", "messages": [{"content": [img]}]}, ("gguf-vision", None, True, ["media wants mmproj"])),
+        ("gguf-range-media", {"model": "qwen3.8-gguf-range", "messages": [{"content": [img]}]}, ("gguf-range", None, True, ["media wants mmproj"])),
+        ("vision-media-stays", {"model": "qwen3.6-35b-vision", "messages": [{"content": [img]}]}, ("vision", None, False, [])),
+        ("ninfer-media-forces", {"model": "qwen3.8-27b-128k", "messages": [{"content": [img]}]}, ("vision", None, False, ["media forces vision"])),
+        ("ninfer-media-none-effort", {"model": "qwen3.8-27b-128k-none", "messages": [{"content": [img]}]}, ("vision", "none", False, ["media forces vision"])),
+        ("gguf-vision-no-media", {"model": "qwen3.8-gguf-vision"}, ("gguf-vision", None, True, [])),
+        ("bonsai-vision-no-media", {"model": "bonsai-2-27b-vision"}, ("bonsai-vision", None, True, [])),
+        ("bonsai-media-lazy", {"model": "bonsai-2-27b-octo64", "messages": [{"content": [img]}]}, ("bonsai-octo64", None, True, ["media wants mmproj"])),
+        ("unknown-model", {"model": "foo"}, ("balanced", None, False, [])),
+        ("unknown-with-media", {"model": "foo", "messages": [{"content": [img]}]}, ("vision", None, False, ["media forces vision"])),
+    ]:
+        check(f"route:{label}", Q(d), want)
+    
+    # ---- message_digest + debug_prompt (prefix-cache forensics, pure) ----
+    D = nr.message_digest
+    m0 = {"role": "user", "content": "hi"}
+    m1 = {"role": "user", "content": "hi", "x": 1}
+    check("digest-stable", D(m0), D(m0))
+    check("digest-stable2", D(m1), D(m1))
+    check("digest-len-8", len(D(m0)), 8)
+    check("digest-order", D(m1), D({"role": "user", "content": "hi", "x": 1}))
+    check("digest-unicode-order", D({"role": "assistant", "content": "áçë", "tool_calls": []}), D({"tool_calls": [], "role": "assistant", "content": "áçë"}))
+    
+    # debug_prompt: env-gated forensics (digest log + optional raw body file);
+    # must not touch the request path or raise.
+    orig_env = dict(os.environ)
+    dump_dir = os.path.join("/tmp", "model-router-dump-{}".format(os.getpid()))
+    os.makedirs(dump_dir, exist_ok=True)
+    try:
+        os.environ["MODEL_ROUTER_DIGEST"] = "1"
+        os.environ["MODEL_ROUTER_DUMP"] = dump_dir
+        nr.debug_prompt({"messages": [m0]}, b'{"model":"x","stream":true}')
+        entries = sorted(os.listdir(dump_dir))
+        check("dump-writes-body", len(entries) == 1 and entries[0].endswith(".json"), True)
+        check("dump-content", open(os.path.join(dump_dir, entries[0]), "rb").read(), b'{"model":"x","stream":true}')
+        # No env -> no-op (no extra file).
+        os.environ.pop("MODEL_ROUTER_DIGEST", None)
+        os.environ.pop("MODEL_ROUTER_DUMP", None)
+        before = len(os.listdir(dump_dir))
+        nr.debug_prompt({"messages": [m0]}, b'{"model":"y"}')
+        check("dump-noop-no-env", len(os.listdir(dump_dir)) == before, True)
+    finally:
+        os.environ.clear()
+        os.environ.update(orig_env)
+        import shutil
+        shutil.rmtree(dump_dir, ignore_errors=True)
+    
     if FAILURES:
         print(f"\n{len(FAILURES)} FAILURES")
         sys.exit(1)

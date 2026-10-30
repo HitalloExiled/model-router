@@ -6,6 +6,31 @@ themselves to free VRAM.
 
 - `model-router.py` — routing, effort policy, SSE relay, retry, backend reuse
 - `tests/test_router.py` — offline unit tests (no GPU/docker needed)
+- `scripts/setup.sh` — idempotent install of all three backends + the unit
+- `scripts/run-router.sh` — run the router in the foreground
+- `scripts/download-models.sh` — fetch the weights per stack (resumable)
+
+## Setup
+
+```bash
+git clone --recurse-submodules <url> model-router && cd model-router
+./scripts/setup.sh          # images, model-artifact check, systemd unit
+./scripts/download-models.sh all   # ~48 GB of weights (resumable)
+```
+
+`scripts/setup.sh` is idempotent: it pulls the pinned llama.cpp image, builds
+`ninfer-4090:sm89` and `bonsai-llama-4090:sm89` when missing, installs and
+restarts `model-router.service`, then runs every stack's `check.sh`.
+
+To run the router in the foreground instead of the unit:
+
+```bash
+./scripts/run-router.sh                     # :18089, same env as the unit
+./scripts/run-router.sh --port 18090 --idle 300
+```
+
+A second instance shares backend `:8080` and the docker containers, so it is a
+debugging aid, not a replacement for the unit.
 
 ## Reasoning effort
 
@@ -21,8 +46,8 @@ Client tier -> Qwen3.8 template hint + hard thinking budget:
 
 `high` maps to `xhigh` because the template rejects `high`; `minimal` is an
 alias for `low`. Budgets use llama.cpp's `reasoning_budget_tokens` and are
-injected only on GGUF profiles — `ninfer-serve` has no budget field, so its
-tiers stay prompt-only. The llama.cpp image is pinned to
+injected only on llama.cpp backends (GGUF + Bonsai) — `ninfer-serve` has no
+budget field, so its tiers stay prompt-only. The llama.cpp image is pinned to
 `server-cuda-b11854`; override with `NINFER_LLAMA_IMAGE`.
 
 The client catalog (`~/.config/opencode/opencode.jsonc`) must list all six

@@ -25,7 +25,7 @@ Guidance for coding agents working in this repository.
 - `high` maps to `xhigh` because the Qwen3.8 template rejects `high`;
   `minimal` aliases `low`.
 - Budgets are llama.cpp-only (`reasoning_budget_tokens`). Never send them
-  to ninfer profiles; gate on `GGUF_FILES`.
+  to ninfer profiles; gate on `LLAMA_ALL` (GGUF_FILES | BONSAI_FILES).
 - `/v1/messages` uses `chat_template_kwargs` + `thinking.budget_tokens`;
   an explicit client `thinking` block wins.
 - The client catalog (`~/.config/opencode/opencode.jsonc`, v2 `variants`
@@ -40,9 +40,14 @@ Guidance for coding agents working in this repository.
   and `stop_backend()` stops all of them before a new boot.
 - The stock llama.cpp image is pinned in both `model-router.py` (`LLAMA_IMAGE`)
   and `gguf-stack/serve-llama.sh`. Bump both together.
-- The Bonsai image is the PrismML fork and is pinned in `bonsai-stack/PIN`.
-  It carries the `org.prismml.ternary` label; `serve-bonsai.sh` refuses any
-  image without it (stock llama.cpp mis-loads the packs and emits garbage).
+- The Bonsai image is built from the PrismML fork, which is the `llama.cpp/`
+  submodule of `bonsai-stack`, checked out at the release tag
+  `prism-b10831-9d9efea`. Its gitlink is the pin: never duplicate the commit
+  in a file. Bump with `git -C llama.cpp checkout prism-bXXXXX-<sha>` and
+  commit the new gitlink; pass the tag to the build only for provenance
+  (`--build-arg PRISM_TAG="$(git -C llama.cpp describe --tags --exact-match)"`).
+  The image carries the `org.prismml.ternary` label; `serve-bonsai.sh` refuses
+  any image without it (stock llama.cpp mis-loads the packs and emits garbage).
 - `PROFILE_SLOTS` is load-bearing for concurrency: reuse requires the resident
   backend to have at least the requested slots, or requests that look
   parallel are queued inside llama-server.

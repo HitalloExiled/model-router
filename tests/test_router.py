@@ -55,6 +55,12 @@ def main():
         "qwen3.8-gguf-duo": ("gguf-duo", None),
         "qwen3.8-gguf-duo128-low": ("gguf-duo128", "low"),
         "qwen3.8-gguf-quad": ("gguf-quad", None),
+        "bonsai-2-27b-max": ("bonsai-max", None),
+        "bonsai-2-27b-quad128-low": ("bonsai-quad128", "low"),
+        "bonsai-2-27b-octo64-xhigh": ("bonsai-octo64", "xhigh"),
+        "bonsai-2-27b-duo128": ("bonsai-duo128", None),
+        "bonsai-2-27b-vision": ("bonsai-vision", None),
+        "bonsai-quad128": ("bonsai-quad128", None),
     }.items():
         check(f"parse:{name}", nr.parse_model(name), want)
 
@@ -121,6 +127,11 @@ def main():
          ("vision", "<ABSENT>", "<ABSENT>")),
         ("plain-untouched", ("qwen3.8-27b-256k",),
          ("ultra", "<ABSENT>", "<ABSENT>")),
+        # Ternary backend must get the same hard budgets as the GGUF one.
+        ("bonsai-low-is-budgeted", ("bonsai-2-27b-quad128-low",),
+         ("bonsai-quad128", "medium", 512)),
+        ("bonsai-high-maps-xhigh", ("bonsai-2-27b-octo64-high",),
+         ("bonsai-octo64", "xhigh", 8192)),
     ]:
         check(f"norm:{label}", chat(*args), want)
 
@@ -160,6 +171,12 @@ def main():
     ]:
         check(f"messages:{label}", messages(*args), want)
 
+    # Bonsai media stays on its own tier with the lazy encoder, like GGUF.
+    check("route:bonsai-media-lazy-mmproj",
+          nr.route_request({"model": "bonsai-2-27b-octo64",
+                            "messages": [{"role": "user", "content": [img]}]}),
+          ("bonsai-octo64", None, True, ["media wants mmproj"]))
+
     E = nr.effective_profile
     for label, w, c, e, m, want in [
         ("same", "balanced", "balanced", 1000, False, "balanced"),
@@ -170,6 +187,22 @@ def main():
         ("media-to-vision", "vision", "balanced", 1000, True, "vision"),
         ("vision-fits-stays", "balanced", "vision", 1000, False, "vision"),
         ("vision-overflow-leaves", "balanced", "vision", 16000, False, "balanced"),
+        # Slot-aware reuse: a resident 1-slot backend must not swallow a
+        # multi-slot tier, and a wider tier still serves the narrower one.
+        ("slots-block-reuse", "gguf-duo128", "gguf-range", 1000, False,
+         "gguf-duo128"),
+        ("slots-allow-reuse", "gguf-range", "gguf-duo128", 1000, False,
+         "gguf-duo128"),
+        ("quad-not-swallowed-by-duo", "gguf-quad", "gguf-duo128", 1000, False,
+         "gguf-quad"),
+        ("bonsai-doubles-gguf", "bonsai-quad128", "gguf-duo128", 1000, False,
+         "bonsai-quad128"),
+        ("bonsai-octo-not-swallowed", "bonsai-octo64", "bonsai-quad128", 1000,
+         False, "bonsai-octo64"),
+        ("bonsai-octo-serves-quad", "bonsai-quad128", "bonsai-octo64", 1000,
+         False, "bonsai-octo64"),
+        ("bonsai-max-reused-for-gguf", "gguf-range", "bonsai-max", 1000, False,
+         "bonsai-max"),
     ]:
         check(f"reuse:{label}", E(w, c, e, m), want)
 
@@ -200,6 +233,11 @@ def main():
          "-m x.gguf --parallel 2 -c 131072", "gguf-duo"),
         ("llama-no-alias-parallel2-256",
          "-m x.gguf --parallel 2 -c 262144", "gguf-duo128"),
+        ("bonsai-alias", "--alias bonsai-quad128 -c 524288 --parallel 4",
+         "bonsai-quad128"),
+        ("bonsai-no-alias-octo",
+         "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf --parallel 8",
+         "bonsai-octo64"),
         ("ninfer-131072", "--max-context 131072 --kv-dtype rk8v4", "balanced"),
         ("ninfer-eq-262144", "--max-context=262144", "ultra"),
         ("unknown", "--foo bar", None),

@@ -71,6 +71,20 @@ GGUF_FILES = {
     "gguf-vision": "Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf",
     "gguf-single192": "Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
 }
+# Bonsai 2 27B (ternary) stack: PrismML fork of llama.cpp. Stock llama.cpp
+# cannot run these packs, so this is a THIRD image — still one backend at a
+# time: whichever model is requested wins and the resident one is stopped.
+BONSAI_IMAGE = os.environ.get(
+    "NINFER_BONSAI_IMAGE", "bonsai-llama-4090:sm89")
+BONSAI_DIR = os.environ.get(
+    "NINFER_BONSAI_DIR", os.path.join(stack_dir("bonsai-stack"), "models"))
+BONSAI_FILES = {
+    "bonsai-max": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+    "bonsai-duo128": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+    "bonsai-quad128": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+    "bonsai-octo64": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+    "bonsai-vision": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+}
 # Boot log lives under ~/.local/share (NOT /tmp): the router may run in a
 # mount namespace with a private /tmp, which would hide the log from shells.
 LOG_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "ninfer")
@@ -82,20 +96,44 @@ BOOT_TIMEOUT = 420
 
 PROFILES = {"balanced", "max", "c1", "ultra", "vision",
             "gguf-speed", "gguf-range", "gguf-max", "gguf-duo", "gguf-duo128",
-            "gguf-quad", "gguf-vision", "gguf-single192"}
+            "gguf-quad", "gguf-vision", "gguf-single192",
+            "bonsai-max", "bonsai-duo128", "bonsai-quad128", "bonsai-octo64",
+            "bonsai-vision"}
+# Per-slot window (a client sees one slot, not the whole pool).
 PROFILE_WINDOWS = {"c1": 65536, "balanced": 131072, "max": 196608,
                    "ultra": 262144, "vision": 16384,
                    "gguf-speed": 65536, "gguf-range": 98304,
                    "gguf-max": 262144, "gguf-duo": 98304,
                    "gguf-duo128": 131072, "gguf-quad": 65536,
-                   "gguf-vision": 65536, "gguf-single192": 196608}
+                   "gguf-vision": 65536, "gguf-single192": 196608,
+                   "bonsai-max": 262144, "bonsai-duo128": 131072,
+                   "bonsai-quad128": 131072, "bonsai-octo64": 65536,
+                   "bonsai-vision": 65536}
+# Parallel slots each profile boots with. Reusing a 1-slot backend for a
+# 4-slot tier is what turns concurrency into a queue, so reuse consults this.
+PROFILE_SLOTS = {"c1": 1, "balanced": 1, "max": 1, "ultra": 1, "vision": 1,
+                 "gguf-speed": 1, "gguf-range": 1, "gguf-max": 1,
+                 "gguf-duo": 2, "gguf-duo128": 2, "gguf-quad": 4,
+                 "gguf-vision": 1, "gguf-single192": 1,
+                 "bonsai-max": 1, "bonsai-duo128": 2,
+                 "bonsai-quad128": 4, "bonsai-octo64": 8,
+                 "bonsai-vision": 1}
 # Every GGUF backend CAN carry mmproj (lazy); only ninfer text tiers need a
 # switch for media (to 35B vision).
 VISION_CAPABLE = {"vision", "gguf-speed", "gguf-range", "gguf-max",
-                  "gguf-duo", "gguf-duo128", "gguf-quad", "gguf-vision"}
+                  "gguf-duo", "gguf-duo128", "gguf-quad", "gguf-vision",
+                  "bonsai-max", "bonsai-duo128", "bonsai-quad128",
+                  "bonsai-octo64", "bonsai-vision"}
 GGUF_ALL = {"gguf-speed", "gguf-range", "gguf-max",
             "gguf-duo", "gguf-duo128", "gguf-quad", "gguf-vision",
             "gguf-single192"}
+BONSAI_ALL = {"bonsai-max", "bonsai-duo128", "bonsai-quad128",
+              "bonsai-octo64", "bonsai-vision"}
+# Everything served by a llama.cpp-family image: budgets apply here.
+LLAMA_ALL = GGUF_ALL | BONSAI_ALL
+# Reuse the resident backend only when it has at least the requested slots.
+# Set MODEL_ROUTER_RESPECT_SLOTS=0 to restore blind tier reuse.
+RESPECT_SLOTS = os.environ.get("MODEL_ROUTER_RESPECT_SLOTS", "1") != "0"
 
 
 def effective_profile(wanted, current, est_tokens, need_vision):
@@ -103,18 +141,23 @@ def effective_profile(wanted, current, est_tokens, need_vision):
 
     A tier switch wipes the server prefix cache (full_reset), forcing a full
     re-prefill (~60s at 100K tokens). Switch only when the running backend
-    cannot serve: media needs vision, or the estimated prompt exceeds 90%
-    of its window. KV-width differences between tiers showed no measurable
-    correctness effect on fitting content, so capacity rules.
+    cannot serve: media needs vision, the estimated prompt exceeds 90% of its
+    window, or the request asks for more parallel slots than the resident
+    backend has. That last clause is what stops a 1-slot backend from
+    silently serializing requests meant for a 2/4/8-slot tier.
     """
     if current in PROFILE_WINDOWS:
-        # Every GGUF backend now carries mmproj: media never forces a switch
-        # off the GGUF stack. Only ninfer text tiers must yield to 35B vision.
+        # Every GGUF/Bonsai backend carries mmproj: media never forces a
+        # switch off them. Only ninfer text tiers must yield to 35B vision.
         if need_vision and current not in VISION_CAPABLE:
             return wanted
-        if est_tokens < 0.9 * PROFILE_WINDOWS[current]:
+        enough_slots = (not RESPECT_SLOTS
+                        or PROFILE_SLOTS.get(current, 1)
+                        >= PROFILE_SLOTS.get(wanted, 1))
+        if enough_slots and est_tokens < 0.9 * PROFILE_WINDOWS[current]:
             return current
     return wanted
+
 
 lock = threading.Lock()
 state = {"profile": None, "profile_mmproj": False, "busy": False,
@@ -134,33 +177,73 @@ def sh(*cmd, timeout=60):
         return 1, str(e)
 
 
-def backend_container():
-    """Newest backend container from either stack (ninfer or llama)."""
+def backend_containers():
+    """Every running backend container (ninfer, llama.cpp or Bonsai), newest first."""
     rc, out = sh("docker", "ps", "--format", "{{.ID}} {{.Image}}")
     if rc != 0:
-        return None
+        return []
+    found = []
     for line in out.splitlines():
         parts = line.split()
-        if len(parts) >= 2 and parts[1] in (IMAGE, LLAMA_IMAGE):
-            return parts[0]
-    return None
+        if len(parts) >= 2 and parts[1] in (IMAGE, LLAMA_IMAGE, BONSAI_IMAGE):
+            found.append(parts[0])
+    return found
+
+
+def backend_container():
+    """Newest backend container from any stack (ninfer, llama or bonsai)."""
+    found = backend_containers()
+    return found[0] if found else None
+
+
+def backend_healthy():
+    """True when something answers /health on the backend port.
+
+    `docker ps` can transiently come back empty (daemon busy, container
+    mid-teardown). Treating that as "nothing is running" reboots a healthy
+    backend and races a second container; the port probe is authoritative.
+    """
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", BACKEND_PORT, timeout=3)
+        conn.request("GET", "/health")
+        return conn.getresponse().status == 200
+    except Exception:
+        return False
 
 
 def stop_backend():
-    cid = backend_container()
-    if cid:
-        log("stopping backend", cid)
-        sh("docker", "stop", cid, timeout=120)
+    """Stop EVERY backend container: one model up means the other goes down.
+
+    Stopping only the newest would leave a second resident backend holding
+    VRAM after a manual launch, so the pre-flight gate must see a clean card.
+    """
+    ids = backend_containers()
+    if ids:
+        log("stopping backend", *ids)
+        sh("docker", "stop", *ids, timeout=120)
     state["profile"] = None
     state["profile_mmproj"] = False
 
 
 SERVE_LLAMA = os.environ.get(
     "LLAMA_SERVE_SH", os.path.join(stack_dir("gguf-stack"), "serve-llama.sh"))
+SERVE_BONSAI = os.environ.get(
+    "BONSAI_SERVE_SH",
+    os.path.join(stack_dir("bonsai-stack"), "serve-bonsai.sh"))
 
 
 def launch_command(profile, want_mmproj=False):
-    """Argv to boot a profile on either stack. None = not wired yet."""
+    """Argv to boot a profile on any stack. None = not wired yet."""
+    if profile in BONSAI_FILES:
+        script = SERVE_BONSAI
+        if not os.path.isfile(script):
+            return None
+        # serve-bonsai profiles are max|duo128|quad128|octo64|vision.
+        args = [script, "--profile", profile.removeprefix("bonsai-"),
+                "--port", str(BACKEND_PORT)]
+        if want_mmproj:
+            args += ["--mmproj", "on"]
+        return args
     if profile in GGUF_FILES:
         script = SERVE_LLAMA
         if not os.path.isfile(script):
@@ -231,7 +314,8 @@ EFFORT_SUFFIXES = ("none", "low", "medium", "high", "xhigh", "minimal")
 # instead of a prompt hint the model ignores. high maps to xhigh (the
 # template rejects "high"); xhigh stays unbounded. minimal is an OpenAI
 # alias for low. Budgets are per thinking block and only injected for
-# llama.cpp backends (GGUF_FILES): ninfer-serve has no budget field.
+# llama.cpp backends (GGUF_FILES + BONSAI_FILES): ninfer-serve has no budget
+# field.
 EFFORT_POLICY = {
     "none": ("none", None),
     "low": ("medium", 512),
@@ -258,6 +342,13 @@ def parse_model(model):
             effort = suffix[1:]
             base = base[: -len(suffix)]
             break
+    if "bonsai" in base:
+        # Ternary Bonsai 2 27B tiers. Match the tier word, not the full id:
+        # the client catalog uses bonsai-2-27b-<tier>.
+        for tier in ("octo64", "quad128", "duo128", "vision", "max"):
+            if tier in base:
+                return f"bonsai-{tier}", effort
+        return "bonsai-max", effort
     if "gguf-vision" in base:
         return "gguf-vision", effort
     if "vision" in base or "35b" in base:
@@ -352,9 +443,9 @@ def route_request(decoded):
     """
     profile, suffix_effort = parse_model(decoded.get("model"))
     notes = []
-    want_mmproj = profile == "gguf-vision"
+    want_mmproj = profile in ("gguf-vision", "bonsai-vision")
     if has_media(decoded):
-        if profile in GGUF_ALL:
+        if profile in LLAMA_ALL:
             # Same tier, lazy encoder: reboot it with mmproj instead of
             # switching tiers (prefix cache is lost either way; tier stays).
             want_mmproj = True
@@ -496,7 +587,7 @@ def normalize_chat_body(path, body, route=None, final_profile=None):
     - Routes the profile from the model name (route_request).
     - Maps the client tier (body, chat_template_kwargs, or -effort suffix)
       through EFFORT_POLICY: template hint + hard reasoning budget.
-    - Budgets only reach llama.cpp backends (final_profile in GGUF_FILES);
+    - Budgets only reach llama.cpp backends (final_profile in LLAMA_ALL);
       ninfer has no reasoning_budget_tokens equivalent.
     - Drops non-none effort on 35B vision: that template supports thinking
       on/off only; low/medium/xhigh 400 (reasoning_effort_not_supported).
@@ -545,12 +636,12 @@ def normalize_chat_body(path, body, route=None, final_profile=None):
             meta["effort"] = None
         if effort:
             if (path.startswith("/v1/messages")
-                    and profile not in GGUF_FILES):
+                    and profile not in LLAMA_ALL):
                 notes.append(f"effort {effort} skipped for ninfer")
             else:
                 changed = apply_effort_policy(
                     decoded, path, effort,
-                    profile in GGUF_FILES, meta, notes)
+                    profile in LLAMA_ALL, meta, notes)
                 modified = modified or changed
     # Skip re-serialization when untouched: json round-trips of multi-MB
     # histories are pure router latency (and transient 2x memory).
@@ -577,7 +668,8 @@ def ensure_backend(profile, want_mmproj=False):
     # Same profile name AND same encoder state → reuse. Only a changed mmproj
     # (or a different tier) reboots; otherwise every media request to the same
     # GGUF tier would stop and reload the backend.
-    if same_backend(name, cur_mmproj, profile, want_mmproj) and backend_container():
+    if same_backend(name, cur_mmproj, profile, want_mmproj) and \
+            (backend_container() or backend_healthy()):
         return True
     if backend_container() or state["profile"]:
         stop_backend()
@@ -622,6 +714,22 @@ STATIC_MODELS = {
         {"id": "qwen3.8-27b-256k", "object": "model", "owned_by": "ninfer",
          "name": "qwen3.8-27b-256k", "context_window": 262144,
          "max_model_len": 262144, "modalities": {"vision": False}},
+        # Ternary Bonsai 2 27B (PrismML fork runtime). Context is per slot.
+        {"id": "bonsai-2-27b-max", "object": "model", "owned_by": "prism",
+         "name": "bonsai-2-27b-max", "context_window": 262144,
+         "max_model_len": 262144, "modalities": {"vision": False}},
+        {"id": "bonsai-2-27b-duo128", "object": "model", "owned_by": "prism",
+         "name": "bonsai-2-27b-duo128", "context_window": 131072,
+         "max_model_len": 131072, "modalities": {"vision": False}},
+        {"id": "bonsai-2-27b-quad128", "object": "model", "owned_by": "prism",
+         "name": "bonsai-2-27b-quad128", "context_window": 131072,
+         "max_model_len": 131072, "modalities": {"vision": False}},
+        {"id": "bonsai-2-27b-octo64", "object": "model", "owned_by": "prism",
+         "name": "bonsai-2-27b-octo64", "context_window": 65536,
+         "max_model_len": 65536, "modalities": {"vision": False}},
+        {"id": "bonsai-2-27b-vision", "object": "model", "owned_by": "prism",
+         "name": "bonsai-2-27b-vision", "context_window": 65536,
+         "max_model_len": 65536, "modalities": {"vision": True}},
     ],
 }
 
@@ -660,7 +768,7 @@ class Handler(BaseHTTPRequestHandler):
                                               "backend": state["profile"],
                                               "busy": state["busy"]}))
         if self.path == "/v1/models":
-            up = state["profile"] and backend_container()
+            up = state["profile"] and (backend_container() or backend_healthy())
             if up:
                 return self._relay(None)
             # Idle: advertise both variants so pickers work cold.
@@ -691,7 +799,7 @@ class Handler(BaseHTTPRequestHandler):
                 _, body, norm_note, norm_mmproj, meta = normalize_chat_body(
                     self.path, body, route=route, final_profile=profile)
                 want_mmproj = want_mmproj or norm_mmproj
-                if need_vision and profile in GGUF_ALL:
+                if need_vision and profile in LLAMA_ALL:
                     want_mmproj = True
                 note += norm_note
                 decoded = json.loads(body)
@@ -843,6 +951,18 @@ def infer_profile(args):
         if t.startswith("--alias="):
             return parse_model(t.split("=", 1)[1])[0]
     # llama.cpp without an alias: fall back to shape heuristics.
+    if "Ternary-Bonsai" in args:
+        if "--parallel 8" in args:
+            return "bonsai-octo64"
+        if "--parallel 4" in args:
+            return "bonsai-quad128"
+        if "--parallel 2" in args:
+            return "bonsai-duo128"
+        if "mmproj" in args:
+            return "bonsai-vision"
+        return "bonsai-max"
+    if "--parallel 8" in args:
+        return "bonsai-octo64" if "Ternary-Bonsai" in args else "gguf-quad"
     if "--parallel 4" in args:
         return "gguf-quad"
     if "--parallel 2" in args:

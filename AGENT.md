@@ -8,8 +8,9 @@ Guidance for coding agents working in this repository.
 - `MINOR`: behavior or API change (routing, effort policy, backend
   contract). `PATCH`: backward-compatible fix.
 - Tag `model-router` and `gguf-stack` together for the same milestone.
+  Tag `bonsai-stack` too when its launcher or image pin moves.
 - The `model-router` tag is the canonical system version: it pins the
-  `ninfer-stack` and `gguf-stack` submodule commits.
+  `ninfer-stack`, `gguf-stack` and `bonsai-stack` submodule commits.
 - Never move or reuse a published tag. Push tags explicitly:
   `git push origin vX.Y.Z` and `git -C gguf-stack push origin vX.Y.Z`.
 - Run `./check.sh` and a GGUF smoke test before tagging.
@@ -34,7 +35,16 @@ Guidance for coding agents working in this repository.
 
 ## Backend notes
 
-- The llama.cpp image is pinned in both `model-router.py` (`LLAMA_IMAGE`)
+- Exactly one backend container may run: `backend_containers()` matches every
+  stack image (`ninfer-4090`, the stock llama.cpp image, `bonsai-llama-4090`)
+  and `stop_backend()` stops all of them before a new boot.
+- The stock llama.cpp image is pinned in both `model-router.py` (`LLAMA_IMAGE`)
   and `gguf-stack/serve-llama.sh`. Bump both together.
+- The Bonsai image is the PrismML fork and is pinned in `bonsai-stack/PIN`.
+  It carries the `org.prismml.ternary` label; `serve-bonsai.sh` refuses any
+  image without it (stock llama.cpp mis-loads the packs and emits garbage).
+- `PROFILE_SLOTS` is load-bearing for concurrency: reuse requires the resident
+  backend to have at least the requested slots, or requests that look
+  parallel are queued inside llama-server.
 - The router prefers the running backend over the requested tier to avoid
   a full re-prefill. A tier switch invalidates the prefix cache.

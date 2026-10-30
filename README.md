@@ -34,11 +34,25 @@ The backend stacks are git submodules of this repo:
 
 - `ninfer-stack/` — NInfer `.ninfer` serving (`serve.sh`, `switch.sh`)
 - `gguf-stack/`  — llama.cpp GGUF serving (`serve-llama.sh`)
+- `bonsai-stack/` — Bonsai 2 27B ternary GGUF (PrismML llama.cpp fork)
+
+Exactly one backend is resident at a time: requesting any profile stops the
+running container before booting the new one, whichever stack it belongs to.
 
 Clone with submodules: `git clone --recurse-submodules <url>` (or
 `git submodule update --init --recursive`).
 
 Launchers are located via env (`NINFER_SERVE_SH`, `LLAMA_SERVE_SH`,
-`NINFER_MODEL_DIR`, `NINFER_GGUF_DIR`); with no env set, each resolves inside
-this repo first, then as a sibling checkout.
-Run `./check.sh` to validate.
+`BONSAI_SERVE_SH`, `NINFER_MODEL_DIR`, `NINFER_GGUF_DIR`, `NINFER_BONSAI_DIR`);
+with no env set, each resolves inside this repo first, then as a sibling
+checkout. Run `./check.sh` to validate.
+
+## Parallel slots
+
+`PROFILE_SLOTS` records how many slots each tier boots. Reuse of the resident
+backend requires it to have **at least** the requested slot count, otherwise a
+1-slot tier would silently serialize requests aimed at a 4-slot one.
+`MODEL_ROUTER_RESPECT_SLOTS=0` restores blind tier reuse. Measure with
+`scripts/parallel-probe.py` (concurrency) and `scripts/probe-exclusive.sh`
+(one model up, the other goes down).
+

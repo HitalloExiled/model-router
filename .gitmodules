@@ -4,3 +4,6 @@
 [submodule "gguf-stack"]
 	path = gguf-stack
 	url = git@github.com:HitalloExiled/gguf-stack.git
+[submodule "bonsai-stack"]
+	path = bonsai-stack
+	url = git@github.com:HitalloExiled/bonsai-stack.git

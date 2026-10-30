@@ -56,6 +56,8 @@ def main():
         "qwen3.8-gguf-duo128-low": ("gguf-duo128", "low"),
         "qwen3.8-gguf-quad": ("gguf-quad", None),
         "bonsai-2-27b-max": ("bonsai-max", None),
+        "bonsai-2-27b-duo256": ("bonsai-duo256", None),
+        "bonsai-2-27b-trio256-medium": ("bonsai-trio256", "medium"),
         "bonsai-2-27b-quad128-low": ("bonsai-quad128", "low"),
         "bonsai-2-27b-octo64-xhigh": ("bonsai-octo64", "xhigh"),
         "bonsai-2-27b-duo128": ("bonsai-duo128", None),
@@ -199,6 +201,16 @@ def main():
          False, "bonsai-octo64"),
         ("bonsai-octo-serves-quad", "bonsai-quad128", "bonsai-octo64", 1000,
          False, "bonsai-octo64"),
+        # Full-window tiers: 3 slots absorb 2, 2 must not swallow 3, and the
+        # single-slot max tier yields to any multi-slot request.
+        ("trio-not-swallowed-by-duo256", "bonsai-trio256", "bonsai-duo256",
+         1000, False, "bonsai-trio256"),
+        ("duo256-reused-by-trio", "bonsai-duo256", "bonsai-trio256", 1000,
+         False, "bonsai-trio256"),
+        ("max-not-swallowed-by-duo256", "bonsai-duo256", "bonsai-max", 1000,
+         False, "bonsai-duo256"),
+        ("duo256-not-swallowed-by-max", "bonsai-max", "bonsai-duo256", 1000,
+         False, "bonsai-duo256"),
         # Reuse never crosses model families: a compliant slot count is not
         # permission to answer a Qwen request with Bonsai weights.
         ("family-switch-gguf-to-bonsai", "bonsai-quad128", "gguf-duo128", 1000,
@@ -241,6 +253,14 @@ def main():
          "-m x.gguf --parallel 2 -c 262144", "gguf-duo128"),
         ("bonsai-alias", "--alias bonsai-quad128 -c 524288 --parallel 4",
          "bonsai-quad128"),
+        ("bonsai-alias-trio", "--alias bonsai-trio256 -c 786432 --parallel 3",
+         "bonsai-trio256"),
+        ("bonsai-alias-duo256", "--alias bonsai-duo256 -c 524288 --parallel 2",
+         "bonsai-duo256"),
+        ("bonsai-no-alias-trio", "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf "
+         "--parallel 3 -c 786432", "bonsai-trio256"),
+        ("bonsai-no-alias-duo256", "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf "
+         "--parallel 2 -c 524288", "bonsai-duo256"),
         ("bonsai-no-alias-octo",
          "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf --parallel 8",
          "bonsai-octo64"),

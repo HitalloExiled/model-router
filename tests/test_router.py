@@ -103,17 +103,17 @@ def main():
           {"reasoning_budget_tokens": 4096}),
          ("vision", "<ABSENT>", "<ABSENT>")),
         ("low-is-budgeted", ("qwen3.8-gguf-max-low",),
-         ("gguf-max", "medium", 512)),
-        ("medium-budget", ("qwen3.8-gguf-max-medium",),
          ("gguf-max", "medium", 2048)),
+        ("medium-budget", ("qwen3.8-gguf-max-medium",),
+         ("gguf-max", "medium", 3072)),
         ("high-maps-xhigh", ("qwen3.8-gguf-max-high",),
          ("gguf-max", "xhigh", 8192)),
         ("minimal-alias-low", ("qwen3.8-gguf-max-minimal",),
-         ("gguf-max", "medium", 512)),
+         ("gguf-max", "medium", 2048)),
         ("xhigh-unbounded", ("qwen3.8-gguf-max-xhigh",),
          ("gguf-max", "xhigh", "<ABSENT>")),
         ("explicit-wins", ("qwen3.8-gguf-max-low", "hi", "medium"),
-         ("gguf-max", "medium", 2048)),
+         ("gguf-max", "medium", 3072)),
         ("explicit-budget-wins",
          ("qwen3.8-gguf-max-low", "hi", None,
           {"reasoning_budget_tokens": 4096}),
@@ -133,11 +133,14 @@ def main():
          ("vision", "<ABSENT>", "<ABSENT>")),
         ("plain-untouched", ("qwen3.8-27b-256k",),
          ("ultra", "<ABSENT>", "<ABSENT>")),
-        # Bonsai opts out of the hard budget: the cap truncates its thinking.
-        ("bonsai-low-no-cap", ("bonsai-2-27b-quad128-low",),
-         ("bonsai-quad128", "medium", "<ABSENT>")),
+        # Bonsai carries a higher safety net: it reasons ~1.7x longer than
+        # Qwen on the same prompt (measured 730-4242 tokens vs 675-2424).
+        ("bonsai-low-budget", ("bonsai-2-27b-quad128-low",),
+         ("bonsai-quad128", "medium", 4096)),
+        ("bonsai-medium-budget", ("bonsai-2-27b-trio256-medium",),
+         ("bonsai-trio256", "medium", 6144)),
         ("bonsai-high-maps-xhigh", ("bonsai-2-27b-octo64-high",),
-         ("bonsai-octo64", "xhigh", "<ABSENT>")),
+         ("bonsai-octo64", "xhigh", 8192)),
     ]:
         check(f"norm:{label}", chat(*args), want)
 
@@ -156,7 +159,7 @@ def main():
 
     for label, args, want in [
         ("gguf-low", ("qwen3.8-gguf-max-low",),
-         ("gguf-max", "medium", True, 512, True)),
+         ("gguf-max", "medium", True, 2048, True)),
         ("gguf-high", ("qwen3.8-gguf-max-high",),
          ("gguf-max", "xhigh", True, 8192, True)),
         ("gguf-none", ("qwen3.8-gguf-max-none",),
@@ -395,36 +398,46 @@ def main():
     ]:
         check(f"budget:{label}", B(d, path), want)
 
-    # ---- apply_effort_policy: caps for llama.cpp, none for uncapped backends,
-    # ---- and a transition message whenever a cap is actually in force ----
+    # ---- apply_effort_policy: per-family safety nets, and a transition
+    # ---- message whenever a cap is actually in force ----
     P = nr.apply_effort_policy
-    d, meta, notes = {"model": "x"}, {}, []
-    P(d, "/v1/chat/completions", "low", True, meta, notes)
-    check("effortpol:budget", d.get("reasoning_budget_tokens"), 512)
-    check("effortpol:budget-msg", d.get("reasoning_budget_message"), nr.BUDGET_MESSAGE)
-    check("effortpol:budget-meta", meta.get("injected_budget"), True)
+    for fam, want in (("gguf", {"low": 2048, "medium": 3072, "high": 8192,
+                                "xhigh": None}),
+                      ("bonsai", {"low": 4096, "medium": 6144, "high": 8192,
+                                  "xhigh": None})):
+        for tier, budget in want.items():
+            d, meta, notes = {"model": "x"}, {}, []
+            P(d, "/v1/chat/completions", tier, fam, meta, notes)
+            check(f"effortpol:{fam}-{tier}-budget",
+                  d.get("reasoning_budget_tokens"), budget)
+            check(f"effortpol:{fam}-{tier}-msg",
+                  "reasoning_budget_message" in d, budget is not None)
+            check(f"effortpol:{fam}-{tier}-meta",
+                  bool(meta.get("injected_budget")), budget is not None)
 
-    for tier in ("low", "medium", "high"):
+    for tier in ("low", "medium", "high", "xhigh"):
         d, meta, notes = {"model": "x"}, {}, []
-        P(d, "/v1/chat/completions", tier, False, meta, notes)
-        check(f"effortpol:no-cap-{tier}", "reasoning_budget_tokens" in d, False)
-        check(f"effortpol:no-cap-msg-{tier}", "reasoning_budget_message" in d, False)
+        P(d, "/v1/chat/completions", tier, "ninfer", meta, notes)
+        check(f"effortpol:ninfer-no-cap-{tier}", "reasoning_budget_tokens" in d, False)
+        check(f"effortpol:ninfer-no-msg-{tier}",
+              "reasoning_budget_message" in d, False)
 
     d, meta, notes = {"reasoning_budget_tokens": 999,
                       "reasoning_budget_message": "mine"}, {}, []
-    P(d, "/v1/chat/completions", "low", True, meta, notes)
+    P(d, "/v1/chat/completions", "low", "gguf", meta, notes)
     check("effortpol:client-budget-kept", d.get("reasoning_budget_tokens"), 999)
     check("effortpol:client-budget-no-msg", d.get("reasoning_budget_message"), "mine")
 
     d, meta, notes = {"reasoning_budget_tokens": 999}, {}, []
-    P(d, "/v1/chat/completions", "low", True, meta, notes)
+    P(d, "/v1/chat/completions", "low", "gguf", meta, notes)
     check("effortpol:client-budget-kept2", d.get("reasoning_budget_tokens"), 999)
     check("effortpol:client-budget-msg", d.get("reasoning_budget_message"), nr.BUDGET_MESSAGE)
 
-    d, meta, notes = {}, {}, []
-    P(d, "/v1/chat/completions", "xhigh", True, meta, notes)
-    check("effortpol:no-budget", "reasoning_budget_tokens" in d, False)
-    check("effortpol:no-budget-msg", "reasoning_budget_message" in d, False)
+    # A cap in force on a client budget must never be reported as absent.
+    d, meta, notes = {"reasoning_budget_tokens": 999}, {}, []
+    P(d, "/v1/chat/completions", "low", "bonsai", meta, notes)
+    check("effortpol:client-budget-note",
+          any("kept from client" in n for n in notes), True)
     
     # ---- route_request: direct coverage of all branches ----
     Q = nr.route_request

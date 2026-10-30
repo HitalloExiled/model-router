@@ -344,27 +344,48 @@ def start_backend(profile, want_mmproj=False):
 
 EFFORT_SUFFIXES = ("none", "low", "medium", "high", "xhigh", "minimal")
 
-# Client-facing tier -> (template reasoning_effort, thinking budget).
+# Backend family -> {tier: (template reasoning_effort, thinking budget)}.
+#
 # The Qwen3.8 template only accepts xhigh|medium|low; "medium" adds no
-# instruction at all, so low/medium are distinguished by the hard budget
-# instead of a prompt hint the model ignores. high maps to xhigh (the
-# template rejects "high"); xhigh stays unbounded. minimal is an OpenAI
+# instruction at all, so low/medium differ only by budget. high maps to xhigh
+# (the template rejects "high"); xhigh stays unbounded. minimal is an OpenAI
 # alias for low. Budgets are per thinking block and only injected for
 # llama.cpp backends (GGUF_FILES + BONSAI_FILES): ninfer-serve has no budget
-# field.
+# field, hence POLICY_UNCAPPED.
 #
-# The GGUF/Qwen side keeps these caps: there the model finishes its thought
-# inside the budget and answers. Bonsai opts out at the call site
-# (family(profile) != "bonsai") -- its thinking runs longer, and the 512 cap
-# cut 63% of turns mid-sentence in an agentic session, which left the answer
-# built on a half-finished line of reasoning.
+# The budgets are SAFETY NETS, not rate limiters: sized above the reasoning
+# the model actually uses, so they only cut pathological turns. Measured with
+# the cap removed (tokens, realistic prompts): Qwen 675-2424, Bonsai
+# 730-4242, trivial prompts ~30-55. At 512 -- well below both -- Qwen answered
+# 54% of a verifiable problem correctly vs 100% uncapped (15/28 vs 26/26),
+# Bonsai 72% vs 100% (13/18 vs 16/16). Three candidate transition messages
+# were indistinguishable from each other, so the cut itself, not its wording,
+# is what costs accuracy. Bonsai sits ~1.7x above Qwen on the same prompt,
+# hence the two tables.
 EFFORT_POLICY = {
-    "none": ("none", None),
-    "low": ("medium", 512),
-    "medium": ("medium", 2048),
-    "high": ("xhigh", 8192),
-    "xhigh": ("xhigh", None),
+    "gguf": {
+        "none": ("none", None),
+        "low": ("medium", 2048),
+        "medium": ("medium", 3072),
+        "high": ("xhigh", 8192),
+        "xhigh": ("xhigh", None),
+    },
+    "bonsai": {
+        "none": ("none", None),
+        "low": ("medium", 4096),
+        "medium": ("medium", 6144),
+        "high": ("xhigh", 8192),
+        "xhigh": ("xhigh", None),
+    },
 }
+# Backends with no budget field at all (ninfer): template hint only.
+POLICY_UNCAPPED = {"none": ("none", None), "low": ("medium", None),
+                   "medium": ("medium", None), "high": ("xhigh", None),
+                   "xhigh": ("xhigh", None)}
+
+
+def effort_policy(family):
+    return EFFORT_POLICY.get(family, POLICY_UNCAPPED)
 EFFORT_ALIASES = {"minimal": "low"}
 BUDGET_KEYS = ("reasoning_budget_tokens", "thinking_budget_tokens")
 
@@ -557,14 +578,15 @@ def has_explicit_budget(decoded, path):
     return False
 
 
-def apply_effort_policy(decoded, path, effort, budget_allowed, meta, notes):
+def apply_effort_policy(decoded, path, effort, family, meta, notes):
     """Rewrite one request to the tier's template hint + hard budget.
 
     Explicit client thinking wins: a disabled thinking block is never
-    re-enabled, and an explicit budget is never overwritten. The budget is
-    only injected for llama.cpp backends; ninfer has no equivalent field.
+    re-enabled, and an explicit budget is never overwritten. `family` selects
+    the budget table; backends without a budget field fall back to
+    POLICY_UNCAPPED (template hint only).
     """
-    template, budget = EFFORT_POLICY[effort]
+    template, budget = effort_policy(family)[effort]
     meta["template"] = template
     mode = client_thinking_mode(decoded, path)
     if mode == "disabled":
@@ -595,7 +617,7 @@ def apply_effort_policy(decoded, path, effort, budget_allowed, meta, notes):
         ctk["reasoning_effort"] = template
         decoded.pop("reasoning_effort", None)
         notes.append(f"effort {effort}->{template}")
-        if budget is not None and budget_allowed:
+        if budget is not None:
             if has_explicit_budget(decoded, path):
                 meta["budget"] = "client"
                 notes.append("budget kept from client")
@@ -610,8 +632,6 @@ def apply_effort_policy(decoded, path, effort, budget_allowed, meta, notes):
                 meta["budget"] = budget
                 meta["injected_budget"] = True
                 notes.append(f"budget {budget}")
-        elif budget is not None:
-            notes.append("budget skipped (ninfer)")
         return True
     decoded["reasoning_effort"] = template
     notes.append(f"effort {effort}->{template}")
@@ -619,14 +639,12 @@ def apply_effort_policy(decoded, path, effort, budget_allowed, meta, notes):
     if capped:
         meta["budget"] = "client"
         notes.append("budget kept from client")
-    elif budget is not None and budget_allowed:
+    elif budget is not None:
         decoded["reasoning_budget_tokens"] = budget
         meta["budget"] = budget
         meta["injected_budget"] = True
         capped = True
         notes.append(f"budget {budget}")
-    elif budget is not None:
-        notes.append("no cap for this backend")
     # A bare forced </think> lands mid-sentence and the model often answers
     # with EOS instead of an answer (Bonsai: ~50% of capped turns in long
     # agentic contexts). Give it a transition first, whoever set the budget.
@@ -641,7 +659,7 @@ def normalize_chat_body(path, body, route=None, final_profile=None):
 
     - Routes the profile from the model name (route_request).
     - Maps the client tier (body, chat_template_kwargs, or -effort suffix)
-      through EFFORT_POLICY: template hint + hard reasoning budget.
+      through effort_policy(family): template hint + reasoning budget.
     - Budgets only reach llama.cpp backends (final_profile in LLAMA_ALL);
       ninfer has no reasoning_budget_tokens equivalent.
     - Drops non-none effort on 35B vision: that template supports thinking
@@ -678,7 +696,7 @@ def normalize_chat_body(path, body, route=None, final_profile=None):
         effort, origin = resolve_effort(decoded, suffix_effort)
         meta["effort"] = effort
         meta["origin"] = origin
-        if effort and effort not in EFFORT_POLICY:
+        if effort and effort not in POLICY_UNCAPPED:
             notes.append(f"ignored unsupported effort {effort}")
             if path.startswith("/v1/chat/completions"):
                 decoded.pop("reasoning_effort", None)
@@ -695,9 +713,7 @@ def normalize_chat_body(path, body, route=None, final_profile=None):
                 notes.append(f"effort {effort} skipped for ninfer")
             else:
                 changed = apply_effort_policy(
-                    decoded, path, effort,
-                    profile in LLAMA_ALL and family(profile) != "bonsai",
-                    meta, notes)
+                    decoded, path, effort, family(profile), meta, notes)
                 modified = modified or changed
     # Skip re-serialization when untouched: json round-trips of multi-MB
     # histories are pure router latency (and transient 2x memory).

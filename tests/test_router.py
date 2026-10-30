@@ -59,6 +59,8 @@ def main():
         "bonsai-2-27b-duo256": ("bonsai-duo256", None),
         "bonsai-2-27b-trio256-medium": ("bonsai-trio256", "medium"),
         "bonsai-2-27b-quad128-low": ("bonsai-quad128", "low"),
+        "bonsai-2-27b-penta128": ("bonsai-penta128", None),
+        "bonsai-2-27b-hexa128-low": ("bonsai-hexa128", "low"),
         "bonsai-2-27b-octo64-xhigh": ("bonsai-octo64", "xhigh"),
         "bonsai-2-27b-duo128": ("bonsai-duo128", None),
         "bonsai-2-27b-vision": ("bonsai-vision", None),
@@ -211,6 +213,18 @@ def main():
          False, "bonsai-duo256"),
         ("duo256-not-swallowed-by-max", "bonsai-max", "bonsai-duo256", 1000,
          False, "bonsai-duo256"),
+        # 128K ladder: 6 slots absorb 4/5, and a 200K prompt must leave a
+        # 128K backend even though it has more slots than trio256.
+        ("hexa-not-swallowed-by-quad", "bonsai-hexa128", "bonsai-quad128",
+         1000, False, "bonsai-hexa128"),
+        ("hexa-not-swallowed-by-penta", "bonsai-hexa128", "bonsai-penta128",
+         1000, False, "bonsai-hexa128"),
+        ("hexa-serves-quad", "bonsai-quad128", "bonsai-hexa128", 1000,
+         False, "bonsai-hexa128"),
+        ("hexa-serves-small-trio", "bonsai-trio256", "bonsai-hexa128", 1000,
+         False, "bonsai-hexa128"),
+        ("hexa-yields-200k-trio", "bonsai-trio256", "bonsai-hexa128", 200000,
+         False, "bonsai-trio256"),
         # Reuse never crosses model families: a compliant slot count is not
         # permission to answer a Qwen request with Bonsai weights.
         ("family-switch-gguf-to-bonsai", "bonsai-quad128", "gguf-duo128", 1000,
@@ -257,6 +271,14 @@ def main():
          "bonsai-trio256"),
         ("bonsai-alias-duo256", "--alias bonsai-duo256 -c 524288 --parallel 2",
          "bonsai-duo256"),
+        ("bonsai-alias-hexa", "--alias bonsai-hexa128 -c 786432 --parallel 6",
+         "bonsai-hexa128"),
+        ("bonsai-alias-penta", "--alias bonsai-penta128 -c 655360 --parallel 5",
+         "bonsai-penta128"),
+        ("bonsai-no-alias-hexa", "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf "
+         "--parallel 6 -c 786432", "bonsai-hexa128"),
+        ("bonsai-no-alias-penta", "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf "
+         "--parallel 5 -c 655360", "bonsai-penta128"),
         ("bonsai-no-alias-trio", "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf "
          "--parallel 3 -c 786432", "bonsai-trio256"),
         ("bonsai-no-alias-duo256", "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf "

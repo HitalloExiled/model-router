@@ -51,5 +51,9 @@ Guidance for coding agents working in this repository.
 - `PROFILE_SLOTS` is load-bearing for concurrency: reuse requires the resident
   backend to have at least the requested slots, or requests that look
   parallel are queued inside llama-server.
+- Reuse is family-scoped: `family()` maps each profile to `ninfer`, `gguf` or
+  `bonsai`, and `effective_profile()` never reuses a backend from another
+  family. Same slot count is not permission to answer a Qwen request with
+  Bonsai weights — that silently changes the model under the client.
 - The router prefers the running backend over the requested tier to avoid
   a full re-prefill. A tier switch invalidates the prefix cache.

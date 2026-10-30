@@ -135,21 +135,41 @@ LLAMA_ALL = GGUF_ALL | BONSAI_ALL
 # Set MODEL_ROUTER_RESPECT_SLOTS=0 to restore blind tier reuse.
 RESPECT_SLOTS = os.environ.get("MODEL_ROUTER_RESPECT_SLOTS", "1") != "0"
 
+# Backend families. Reuse never crosses families: answering a qwen3.8-gguf-*
+# request from a resident Bonsai backend (or the reverse) returns a different
+# model than the client asked for, which is a correctness bug, not a cache
+# win. Inside a family every tier serves the same weights, so the wider tier
+# can absorb the request and keep the prefix cache.
+NINFER_ALL = {"balanced", "max", "c1", "ultra", "vision"}
+
+
+def family(profile):
+    if profile in BONSAI_ALL:
+        return "bonsai"
+    if profile in GGUF_ALL:
+        return "gguf"
+    if profile in NINFER_ALL:
+        return "ninfer"
+    return None
+
 
 def effective_profile(wanted, current, est_tokens, need_vision):
     """Prefer the running backend over the requested tier.
 
     A tier switch wipes the server prefix cache (full_reset), forcing a full
     re-prefill (~60s at 100K tokens). Switch only when the running backend
-    cannot serve: media needs vision, the estimated prompt exceeds 90% of its
-    window, or the request asks for more parallel slots than the resident
-    backend has. That last clause is what stops a 1-slot backend from
-    silently serializing requests meant for a 2/4/8-slot tier.
+    cannot serve: different model family, media needs vision, the estimated
+    prompt exceeds 90% of its window, or the request asks for more parallel
+    slots than the resident backend has. That last clause is what stops a
+    1-slot backend from silently serializing requests meant for a 2/4/8-slot
+    tier.
     """
     if current in PROFILE_WINDOWS:
         # Every GGUF/Bonsai backend carries mmproj: media never forces a
         # switch off them. Only ninfer text tiers must yield to 35B vision.
         if need_vision and current not in VISION_CAPABLE:
+            return wanted
+        if family(current) != family(wanted):
             return wanted
         enough_slots = (not RESPECT_SLOTS
                         or PROFILE_SLOTS.get(current, 1)

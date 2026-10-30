@@ -195,13 +195,19 @@ def main():
          "gguf-duo128"),
         ("quad-not-swallowed-by-duo", "gguf-quad", "gguf-duo128", 1000, False,
          "gguf-quad"),
-        ("bonsai-doubles-gguf", "bonsai-quad128", "gguf-duo128", 1000, False,
-         "bonsai-quad128"),
         ("bonsai-octo-not-swallowed", "bonsai-octo64", "bonsai-quad128", 1000,
          False, "bonsai-octo64"),
         ("bonsai-octo-serves-quad", "bonsai-quad128", "bonsai-octo64", 1000,
          False, "bonsai-octo64"),
-        ("bonsai-max-reused-for-gguf", "gguf-range", "bonsai-max", 1000, False,
+        # Reuse never crosses model families: a compliant slot count is not
+        # permission to answer a Qwen request with Bonsai weights.
+        ("family-switch-gguf-to-bonsai", "bonsai-quad128", "gguf-duo128", 1000,
+         False, "bonsai-quad128"),
+        ("family-switch-bonsai-to-gguf", "gguf-range", "bonsai-max", 1000,
+         False, "gguf-range"),
+        ("family-switch-ninfer-to-gguf", "gguf-range", "balanced", 1000, False,
+         "gguf-range"),
+        ("family-switch-ninfer-to-bonsai", "bonsai-max", "ultra", 1000, False,
          "bonsai-max"),
     ]:
         check(f"reuse:{label}", E(w, c, e, m), want)

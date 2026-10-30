@@ -81,3 +81,7 @@ backend requires it to have **at least** the requested slot count, otherwise a
 `scripts/parallel-probe.py` (concurrency) and `scripts/probe-exclusive.sh`
 (one model up, the other goes down).
 
+Reuse is also restricted to the same model family (`ninfer`, `gguf`, `bonsai`):
+a resident Bonsai backend will never answer a `qwen3.8-gguf-*` request just
+because the prompt fits and the slot count is sufficient.
+

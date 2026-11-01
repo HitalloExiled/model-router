@@ -10,7 +10,7 @@ Guidance for coding agents working in this repository.
 - Tag `model-router` and `gguf-stack` together for the same milestone.
   Tag `bonsai-stack` too when its launcher or image pin moves.
 - The `model-router` tag is the canonical system version: it pins the
-  `ninfer-stack`, `gguf-stack` and `bonsai-stack` submodule commits.
+  `gguf-stack` and `bonsai-stack` submodule commits.
 - Never move or reuse a published tag. Push tags explicitly:
   `git push origin vX.Y.Z` and `git -C gguf-stack push origin vX.Y.Z`.
 - Run `./check.sh` and a GGUF smoke test before tagging.
@@ -24,8 +24,8 @@ Guidance for coding agents working in this repository.
   prefix identical and preserves llama.cpp's prefix cache.
 - `high` maps to `xhigh` because the Qwen3.8 template rejects `high`;
   `minimal` aliases `low`.
-- Budgets are llama.cpp-only (`reasoning_budget_tokens`). Never send them
-  to ninfer profiles; gate on `LLAMA_ALL` (GGUF_FILES | BONSAI_FILES).
+- Budgets are llama.cpp-only (`reasoning_budget_tokens`); gate on `LLAMA_ALL`
+  (GGUF_FILES | BONSAI_FILES). An unknown family falls back to the gguf table.
 - `/v1/messages` uses `chat_template_kwargs` + `thinking.budget_tokens`;
   an explicit client `thinking` block wins.
 - The client catalog (`~/.config/opencode/opencode.jsonc`, v2 `variants`
@@ -36,8 +36,8 @@ Guidance for coding agents working in this repository.
 ## Backend notes
 
 - Exactly one backend container may run: `backend_containers()` matches every
-  stack image (`ninfer-4090`, the stock llama.cpp image, `bonsai-llama-4090`)
-  and `stop_backend()` stops all of them before a new boot.
+  stack image (the stock llama.cpp image and `bonsai-llama-4090`) and
+  `stop_backend()` stops all of them before a new boot.
 - The stock llama.cpp image is pinned in both `model-router.py` (`LLAMA_IMAGE`)
   and `gguf-stack/serve-llama.sh`. Bump both together.
 - The Bonsai image is built from the PrismML fork, which is the `llama.cpp/`
@@ -51,7 +51,7 @@ Guidance for coding agents working in this repository.
 - `PROFILE_SLOTS` is load-bearing for concurrency: reuse requires the resident
   backend to have at least the requested slots, or requests that look
   parallel are queued inside llama-server.
-- Reuse is family-scoped: `family()` maps each profile to `ninfer`, `gguf` or
+- Reuse is family-scoped: `family()` maps each profile to `gguf` or
   `bonsai`, and `effective_profile()` never reuses a backend from another
   family. Same slot count is not permission to answer a Qwen request with
   Bonsai weights — that silently changes the model under the client.

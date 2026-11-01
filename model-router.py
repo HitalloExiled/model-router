@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""NInfer model router: Ollama-style load/unload across serve.sh profiles.
+"""Model router: Ollama-style load/unload across llama.cpp serve profiles.
 
-Listens on ROUTER_PORT (default 18089) and forwards to a single ninfer-serve
-backend on BACKEND_PORT (default 8080). The requested OpenAI model name picks
-the backend profile:
+Listens on MODEL_ROUTER_PORT (default 18089) and forwards to a single
+llama.cpp backend on MODEL_ROUTER_BACKEND_PORT (default 8080). The requested
+OpenAI model name picks the backend profile:
 
-  qwen3.8-27b-max   -> serve.sh --profile max      (192K, rk4v4-e8)
-  *256k*             -> serve.sh --profile ultra    (256K, rk2v4-e8)
-  *64k*             -> serve.sh --profile c1        (64K, int8, widest KV)
-  qwen3.8-27b*      -> serve.sh --profile balanced (128K, rk8v4)
+  qwen3.8-gguf-*    -> gguf-stack/serve-llama.sh    (Qwen3.8 27B, GGUF)
+  bonsai-2-27b-*    -> bonsai-stack/serve-bonsai.sh (Bonsai 2 27B, ternary)
 
 Any other model name reuses whatever backend is running (the server accepts
 arbitrary model strings). Switching profiles stops the running container and
@@ -16,8 +14,10 @@ boots the wanted one (~60s cold start); after IDLE_SEC seconds without
 requests the backend is stopped to free VRAM.
 
 Env:
-  MODEL_ROUTER_PORT / NINFER_BACKEND_PORT / MODEL_ROUTER_IDLE_SEC (default 900)
-  NINFER_MODEL_DIR / NINFER_DOCKER_IMAGE (forwarded to serve.sh)
+  MODEL_ROUTER_PORT / MODEL_ROUTER_BACKEND_PORT / MODEL_ROUTER_IDLE_SEC
+    (default 18089 / 8080 / 900)
+  MODEL_ROUTER_LLAMA_SERVE_SH / MODEL_ROUTER_BONSAI_SERVE_SH (launchers)
+  NINFER_LLAMA_IMAGE / NINFER_BONSAI_IMAGE (shared with the serve scripts)
   MODEL_ROUTER_DIGEST=1 / MODEL_ROUTER_DUMP=<dir> (prefix-cache forensics)
 """
 import hashlib
@@ -40,27 +40,19 @@ def stack_dir(name):
         os.path.dirname(ROUTER_DIR), name)
 
 
-SERVE = os.environ.get(
-    "NINFER_SERVE_SH", os.path.join(stack_dir("ninfer-stack"), "serve.sh"))
-NINFER_MODELS_DEFAULT = os.path.join(stack_dir("ninfer-stack"), "models")
-MODEL_FILE = os.path.join(
-    os.environ.get("NINFER_MODEL_DIR", NINFER_MODELS_DEFAULT),
-    "qwen3_8_27b.ninfer",
-)
-VISION_FILE = os.path.join(
-    os.environ.get("NINFER_MODEL_DIR", NINFER_MODELS_DEFAULT),
-    "qwen3_6_35b_a3b.ninfer",
-)
-# Backend artifact per profile; everything text runs the Qwen3.8 weights.
-PROFILE_MODELS = {"vision": VISION_FILE}
-IMAGE = os.environ.get("NINFER_DOCKER_IMAGE", "ninfer-4090:sm89")
-# llama-server stack (GGUF pilot): second image + artifacts. Flags live in
-# scripts/serve-llama.sh; the router only selects profile -> argv here.
+SERVE_LLAMA = os.environ.get(
+    "MODEL_ROUTER_LLAMA_SERVE_SH",
+    os.path.join(stack_dir("gguf-stack"), "serve-llama.sh"))
+SERVE_BONSAI = os.environ.get(
+    "MODEL_ROUTER_BONSAI_SERVE_SH",
+    os.path.join(stack_dir("bonsai-stack"), "serve-bonsai.sh"))
+# llama.cpp stack (GGUF). Flags live in gguf-stack/serve-llama.sh; the router
+# only selects profile -> argv here. Image names are shared with the serve
+# scripts (which own the NINFER_* env names): the router reads them to
+# recognize a running container, the scripts to pick the image to run.
 LLAMA_IMAGE = os.environ.get(
     "NINFER_LLAMA_IMAGE",
     "ghcr.io/ggml-org/llama.cpp:server-cuda-b11854")
-GGUF_DIR = os.environ.get(
-    "NINFER_GGUF_DIR", os.path.join(stack_dir("gguf-stack"), "models"))
 GGUF_FILES = {
     "gguf-speed": "Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
     "gguf-range": "Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf",
@@ -76,8 +68,6 @@ GGUF_FILES = {
 # time: whichever model is requested wins and the resident one is stopped.
 BONSAI_IMAGE = os.environ.get(
     "NINFER_BONSAI_IMAGE", "bonsai-llama-4090:sm89")
-BONSAI_DIR = os.environ.get(
-    "NINFER_BONSAI_DIR", os.path.join(stack_dir("bonsai-stack"), "models"))
 BONSAI_FILES = {
     "bonsai-max": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
     "bonsai-duo256": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
@@ -92,24 +82,21 @@ BONSAI_FILES = {
 }
 # Boot log lives under ~/.local/share (NOT /tmp): the router may run in a
 # mount namespace with a private /tmp, which would hide the log from shells.
-LOG_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "ninfer")
-BOOT_LOG = os.path.join(LOG_DIR, "ninfer-backend-boot.log")
+LOG_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "model-router")
+BOOT_LOG = os.path.join(LOG_DIR, "backend-boot.log")
 ROUTER_PORT = int(os.environ.get("MODEL_ROUTER_PORT", "18089"))
-BACKEND_PORT = int(os.environ.get("NINFER_BACKEND_PORT", "8080"))
+BACKEND_PORT = int(os.environ.get("MODEL_ROUTER_BACKEND_PORT", "8080"))
 IDLE_SEC = int(os.environ.get("MODEL_ROUTER_IDLE_SEC", "900"))
 BOOT_TIMEOUT = 420
 
-PROFILES = {"balanced", "max", "c1", "ultra", "vision",
-            "gguf-speed", "gguf-range", "gguf-max", "gguf-duo", "gguf-duo128",
+PROFILES = {"gguf-speed", "gguf-range", "gguf-max", "gguf-duo", "gguf-duo128",
             "gguf-quad", "gguf-vision", "gguf-single192",
             "bonsai-max", "bonsai-duo256", "bonsai-trio256", "bonsai-trio200",
             "bonsai-duo128",
             "bonsai-quad128", "bonsai-penta128", "bonsai-hexa128",
             "bonsai-octo64", "bonsai-vision"}
 # Per-slot window (a client sees one slot, not the whole pool).
-PROFILE_WINDOWS = {"c1": 65536, "balanced": 131072, "max": 196608,
-                   "ultra": 262144, "vision": 16384,
-                   "gguf-speed": 65536, "gguf-range": 98304,
+PROFILE_WINDOWS = {"gguf-speed": 65536, "gguf-range": 98304,
                    "gguf-max": 262144, "gguf-duo": 98304,
                    "gguf-duo128": 131072, "gguf-quad": 65536,
                    "gguf-vision": 65536, "gguf-single192": 196608,
@@ -121,8 +108,7 @@ PROFILE_WINDOWS = {"c1": 65536, "balanced": 131072, "max": 196608,
                    "bonsai-vision": 65536}
 # Parallel slots each profile boots with. Reusing a 1-slot backend for a
 # 4-slot tier is what turns concurrency into a queue, so reuse consults this.
-PROFILE_SLOTS = {"c1": 1, "balanced": 1, "max": 1, "ultra": 1, "vision": 1,
-                 "gguf-speed": 1, "gguf-range": 1, "gguf-max": 1,
+PROFILE_SLOTS = {"gguf-speed": 1, "gguf-range": 1, "gguf-max": 1,
                  "gguf-duo": 2, "gguf-duo128": 2, "gguf-quad": 4,
                  "gguf-vision": 1, "gguf-single192": 1,
                  "bonsai-max": 1, "bonsai-duo256": 2, "bonsai-trio256": 3,
@@ -130,10 +116,11 @@ PROFILE_SLOTS = {"c1": 1, "balanced": 1, "max": 1, "ultra": 1, "vision": 1,
                  "bonsai-duo128": 2, "bonsai-quad128": 4,
                  "bonsai-penta128": 5, "bonsai-hexa128": 6,
                  "bonsai-octo64": 8, "bonsai-vision": 1}
-# Every GGUF backend CAN carry mmproj (lazy); only ninfer text tiers need a
-# switch for media (to 35B vision).
-VISION_CAPABLE = {"vision", "gguf-speed", "gguf-range", "gguf-max",
+# Every GGUF/Bonsai backend CAN carry mmproj (lazy load), so media never
+# forces a tier switch.
+VISION_CAPABLE = {"gguf-speed", "gguf-range", "gguf-max",
                   "gguf-duo", "gguf-duo128", "gguf-quad", "gguf-vision",
+                  "gguf-single192",
                   "bonsai-max", "bonsai-duo256", "bonsai-trio256",
                   "bonsai-trio200", "bonsai-duo128", "bonsai-quad128",
                   "bonsai-penta128", "bonsai-hexa128", "bonsai-octo64",
@@ -156,7 +143,6 @@ RESPECT_SLOTS = os.environ.get("MODEL_ROUTER_RESPECT_SLOTS", "1") != "0"
 # model than the client asked for, which is a correctness bug, not a cache
 # win. Inside a family every tier serves the same weights, so the wider tier
 # can absorb the request and keep the prefix cache.
-NINFER_ALL = {"balanced", "max", "c1", "ultra", "vision"}
 
 
 def family(profile):
@@ -164,8 +150,6 @@ def family(profile):
         return "bonsai"
     if profile in GGUF_ALL:
         return "gguf"
-    if profile in NINFER_ALL:
-        return "ninfer"
     return None
 
 
@@ -182,7 +166,7 @@ def effective_profile(wanted, current, est_tokens, need_vision):
     """
     if current in PROFILE_WINDOWS:
         # Every GGUF/Bonsai backend carries mmproj: media never forces a
-        # switch off them. Only ninfer text tiers must yield to 35B vision.
+        # switch off them.
         if need_vision and current not in VISION_CAPABLE:
             return wanted
         if family(current) != family(wanted):
@@ -214,20 +198,20 @@ def sh(*cmd, timeout=60):
 
 
 def backend_containers():
-    """Every running backend container (ninfer, llama.cpp or Bonsai), newest first."""
+    """Every running backend container (llama.cpp or Bonsai), newest first."""
     rc, out = sh("docker", "ps", "--format", "{{.ID}} {{.Image}}")
     if rc != 0:
         return []
     found = []
     for line in out.splitlines():
         parts = line.split()
-        if len(parts) >= 2 and parts[1] in (IMAGE, LLAMA_IMAGE, BONSAI_IMAGE):
+        if len(parts) >= 2 and parts[1] in (LLAMA_IMAGE, BONSAI_IMAGE):
             found.append(parts[0])
     return found
 
 
 def backend_container():
-    """Newest backend container from any stack (ninfer, llama or bonsai)."""
+    """Newest backend container from any stack (llama or bonsai)."""
     found = backend_containers()
     return found[0] if found else None
 
@@ -261,13 +245,6 @@ def stop_backend():
     state["profile_mmproj"] = False
 
 
-SERVE_LLAMA = os.environ.get(
-    "LLAMA_SERVE_SH", os.path.join(stack_dir("gguf-stack"), "serve-llama.sh"))
-SERVE_BONSAI = os.environ.get(
-    "BONSAI_SERVE_SH",
-    os.path.join(stack_dir("bonsai-stack"), "serve-bonsai.sh"))
-
-
 def launch_command(profile, want_mmproj=False):
     """Argv to boot a profile on any stack. None = not wired yet."""
     if profile in BONSAI_FILES:
@@ -291,9 +268,6 @@ def launch_command(profile, want_mmproj=False):
             args.append("--mmproj")
             args.append("on")
         return args
-    if profile in PROFILES:
-        return [SERVE, PROFILE_MODELS.get(profile, MODEL_FILE),
-                "--profile", profile, "--port", str(BACKEND_PORT)]
     return None
 
 
@@ -350,8 +324,7 @@ EFFORT_SUFFIXES = ("none", "low", "medium", "high", "xhigh", "minimal")
 # instruction at all, so low/medium differ only by budget. high maps to xhigh
 # (the template rejects "high"); xhigh stays unbounded. minimal is an OpenAI
 # alias for low. Budgets are per thinking block and only injected for
-# llama.cpp backends (GGUF_FILES + BONSAI_FILES): ninfer-serve has no budget
-# field, hence POLICY_UNCAPPED.
+# llama.cpp backends (GGUF_FILES + BONSAI_FILES).
 #
 # The budgets are SAFETY NETS, not rate limiters: sized above the reasoning
 # the model actually uses, so they only cut pathological turns. Measured with
@@ -378,14 +351,12 @@ EFFORT_POLICY = {
         "xhigh": ("xhigh", None),
     },
 }
-# Backends with no budget field at all (ninfer): template hint only.
-POLICY_UNCAPPED = {"none": ("none", None), "low": ("medium", None),
-                   "medium": ("medium", None), "high": ("xhigh", None),
-                   "xhigh": ("xhigh", None)}
 
 
+# Backends with no distinct policy fall back to the gguf table: a missing
+# family means an unknown profile, and budgeting like Qwen is the safe default.
 def effort_policy(family):
-    return EFFORT_POLICY.get(family, POLICY_UNCAPPED)
+    return EFFORT_POLICY.get(family, EFFORT_POLICY["gguf"])
 EFFORT_ALIASES = {"minimal": "low"}
 BUDGET_KEYS = ("reasoning_budget_tokens", "thinking_budget_tokens")
 
@@ -399,8 +370,8 @@ def parse_model(model):
     """Split '<base>[-effort]' into (profile, effort|None).
 
     Effort is the trailing '-<effort>' segment (xhigh matched before high).
-    The '-max' tier marker is not an effort: 'qwen3.8-27b-max' has no suffix,
-    'qwen3.8-27b-max-medium' is tier max + effort medium.
+    The '-max' tier marker is not an effort: 'qwen3.8-gguf-max' has no suffix,
+    'qwen3.8-gguf-max-medium' is tier max + effort medium.
     """
     effort = None
     base = model if isinstance(model, str) else ""
@@ -420,8 +391,6 @@ def parse_model(model):
         return "bonsai-max", effort
     if "gguf-vision" in base:
         return "gguf-vision", effort
-    if "vision" in base or "35b" in base:
-        return "vision", effort
     if "gguf-speed" in base:
         return "gguf-speed", effort
     if "gguf-duo128" in base:
@@ -436,13 +405,10 @@ def parse_model(model):
         return "gguf-max", effort
     if "gguf-range" in base or "gguf" in base:
         return "gguf-range", effort
-    if base.startswith("qwen3.8-27b-max") or "192k" in base:
-        return "max", effort
-    if "256k" in base:
-        return "ultra", effort
-    if "64k" in base:
-        return "c1", effort
-    return "balanced", effort
+    # Unknown names land on the general-purpose Qwen tier: the server accepts
+    # arbitrary model strings, so routing them anywhere else would silently
+    # pick the wrong weights.
+    return "gguf-range", effort
 
 
 def has_media(decoded):
@@ -507,24 +473,17 @@ def debug_prompt(decoded, body):
 def route_request(decoded):
     """Return (profile, suffix_effort, want_mmproj, notes) for a request.
 
-    Media on a GGUF tier wants mmproj on that SAME tier (lazy upgrade), not a
-    tier switch. Media on ninfer text forces 35B vision.
+    Media on any GGUF/Bonsai tier wants mmproj on that SAME tier (lazy
+    upgrade), never a tier switch: every backend here can carry the encoder.
     """
     profile, suffix_effort = parse_model(decoded.get("model"))
     notes = []
     want_mmproj = profile in ("gguf-vision", "bonsai-vision")
-    if has_media(decoded):
-        if profile in LLAMA_ALL:
-            # Same tier, lazy encoder: reboot it with mmproj instead of
-            # switching tiers (prefix cache is lost either way; tier stays).
-            want_mmproj = True
-            notes.append("media wants mmproj")
-        elif profile not in VISION_CAPABLE:
-            # Image/video input requires a vision-capable backend; ninfer
-            # text tiers go 35B vision, otherwise the server 400s
-            # vision_disabled.
-            profile = "vision"
-            notes.append("media forces vision")
+    if has_media(decoded) and profile in LLAMA_ALL:
+        # Same tier, lazy encoder: reboot it with mmproj instead of switching
+        # tiers (prefix cache is lost either way; tier stays).
+        want_mmproj = True
+        notes.append("media wants mmproj")
     return profile, suffix_effort, want_mmproj, notes
 
 
@@ -583,8 +542,7 @@ def apply_effort_policy(decoded, path, effort, family, meta, notes):
 
     Explicit client thinking wins: a disabled thinking block is never
     re-enabled, and an explicit budget is never overwritten. `family` selects
-    the budget table; backends without a budget field fall back to
-    POLICY_UNCAPPED (template hint only).
+    the budget table; an unknown family falls back to the gguf table.
     """
     template, budget = effort_policy(family)[effort]
     meta["template"] = template
@@ -660,12 +618,8 @@ def normalize_chat_body(path, body, route=None, final_profile=None):
     - Routes the profile from the model name (route_request).
     - Maps the client tier (body, chat_template_kwargs, or -effort suffix)
       through effort_policy(family): template hint + reasoning budget.
-    - Budgets only reach llama.cpp backends (final_profile in LLAMA_ALL);
-      ninfer has no reasoning_budget_tokens equivalent.
-    - Drops non-none effort on 35B vision: that template supports thinking
-      on/off only; low/medium/xhigh 400 (reasoning_effort_not_supported).
-    Explicit client values always win except on 35B vision, where only none
-    survives.
+    - Budgets only reach llama.cpp backends (final_profile in LLAMA_ALL).
+    Explicit client values always win.
     """
     decoded = json.loads(body or b"{}")
     if route is None:
@@ -676,45 +630,24 @@ def normalize_chat_body(path, body, route=None, final_profile=None):
     modified = False
     meta = {"effort": None, "origin": None, "template": None,
             "budget": None, "injected_budget": False}
-    if profile == "vision":
+    effort, origin = resolve_effort(decoded, suffix_effort)
+    meta["effort"] = effort
+    meta["origin"] = origin
+    if effort and effort not in EFFORT_POLICY["gguf"]:
+        notes.append(f"ignored unsupported effort {effort}")
         if path.startswith("/v1/chat/completions"):
-            if (suffix_effort == "none"
-                    and "reasoning_effort" not in decoded):
-                decoded["reasoning_effort"] = "none"
-                modified = True
-                notes.append("injected none")
-            if decoded.get("reasoning_effort") not in (None, "none"):
-                notes.append(
-                    f"vision dropped {decoded.pop('reasoning_effort')}")
-                modified = True
-            for key in BUDGET_KEYS:
-                if key in decoded:
-                    decoded.pop(key)
-                    modified = True
-                    notes.append(f"vision dropped {key}")
-    else:
-        effort, origin = resolve_effort(decoded, suffix_effort)
-        meta["effort"] = effort
-        meta["origin"] = origin
-        if effort and effort not in POLICY_UNCAPPED:
-            notes.append(f"ignored unsupported effort {effort}")
-            if path.startswith("/v1/chat/completions"):
-                decoded.pop("reasoning_effort", None)
-            else:
-                ctk = decoded.get("chat_template_kwargs")
-                if isinstance(ctk, dict):
-                    ctk.pop("reasoning_effort", None)
-            modified = True
-            effort = None
-            meta["effort"] = None
-        if effort:
-            if (path.startswith("/v1/messages")
-                    and profile not in LLAMA_ALL):
-                notes.append(f"effort {effort} skipped for ninfer")
-            else:
-                changed = apply_effort_policy(
-                    decoded, path, effort, family(profile), meta, notes)
-                modified = modified or changed
+            decoded.pop("reasoning_effort", None)
+        else:
+            ctk = decoded.get("chat_template_kwargs")
+            if isinstance(ctk, dict):
+                ctk.pop("reasoning_effort", None)
+        modified = True
+        effort = None
+        meta["effort"] = None
+    if effort:
+        changed = apply_effort_policy(
+            decoded, path, effort, family(profile), meta, notes)
+        modified = modified or changed
     # Skip re-serialization when untouched: json round-trips of multi-MB
     # histories are pure router latency (and transient 2x memory).
     new_body = json.dumps(decoded).encode() if modified else (body or b"{}")
@@ -774,20 +707,21 @@ def idle_watch():
 STATIC_MODELS = {
     "object": "list",
     "data": [
-        {"id": "qwen3.8-27b-64k", "object": "model", "owned_by": "ninfer",
-         "name": "qwen3.8-27b-64k", "context_window": 65536,
-         "max_model_len": 65536, "modalities": {"vision": False}},
-        {"id": "qwen3.8-27b", "object": "model", "owned_by": "ninfer",
-         "name": "qwen3.8-27b", "context_window": 131072,
-         "max_model_len": 131072, "modalities": {"vision": False}},
-        {"id": "qwen3.8-27b-max", "object": "model", "owned_by": "ninfer",
-         "name": "qwen3.8-27b-max", "context_window": 196608,
-         "max_model_len": 196608, "modalities": {"vision": False}},
-        {"id": "qwen3.6-35b-vision", "object": "model", "owned_by": "ninfer",
-         "name": "qwen3.6-35b-vision", "context_window": 16384,
-         "max_model_len": 16384, "modalities": {"vision": True}},
-        {"id": "qwen3.8-27b-256k", "object": "model", "owned_by": "ninfer",
-         "name": "qwen3.8-27b-256k", "context_window": 262144,
+        # Qwen3.8 27B (llama.cpp GGUF). Context is per slot.
+        {"id": "qwen3.8-gguf-duo128", "object": "model",
+         "owned_by": "llama.cpp", "name": "qwen3.8-gguf-duo128",
+         "context_window": 131072, "max_model_len": 131072,
+         "modalities": {"vision": False}},
+        {"id": "qwen3.8-gguf-quad", "object": "model",
+         "owned_by": "llama.cpp", "name": "qwen3.8-gguf-quad",
+         "context_window": 65536, "max_model_len": 65536,
+         "modalities": {"vision": False}},
+        {"id": "qwen3.8-gguf-single192", "object": "model",
+         "owned_by": "llama.cpp", "name": "qwen3.8-gguf-single192",
+         "context_window": 196608, "max_model_len": 196608,
+         "modalities": {"vision": False}},
+        {"id": "qwen3.8-gguf-max", "object": "model", "owned_by": "llama.cpp",
+         "name": "qwen3.8-gguf-max", "context_window": 262144,
          "max_model_len": 262144, "modalities": {"vision": False}},
         # Ternary Bonsai 2 27B (PrismML fork runtime). Context is per slot.
         {"id": "bonsai-2-27b-max", "object": "model", "owned_by": "prism",
@@ -1021,18 +955,6 @@ def infer_profile(args):
     if not args:
         return None
     toks = args.split()
-    # ninfer-serve tier: --max-context <n> (space or '=' form).
-    win = None
-    for i, t in enumerate(toks):
-        if t.startswith("--max-context"):
-            if "=" in t:
-                win = t.split("=", 1)[1]
-            elif i + 1 < len(toks):
-                win = toks[i + 1]
-            break
-    if win is not None:
-        return {"65536": "c1", "131072": "balanced", "196608": "max",
-                "262144": "ultra", "32768": "vision"}.get(win)
     # llama.cpp: the routing name rides on --alias (its entrypoint, not an
     # arg, is what runs llama-server).
     for i, t in enumerate(toks):
@@ -1079,11 +1001,8 @@ def infer_profile(args):
 
 
 if __name__ == "__main__":
-    if not os.path.isfile(MODEL_FILE):
-        raise SystemExit(f"model not found: {MODEL_FILE}")
     # Adopt an already-running backend instead of rebooting it: infer the
-    # profile from the container's server args (llama --alias / ninfer
-    # --max-context).
+    # profile from the container's server args (llama --alias / shape).
     cid = backend_container()
     if cid:
         rc, args = sh("docker", "inspect", "-f", "{{join .Args \" \"}}", cid)

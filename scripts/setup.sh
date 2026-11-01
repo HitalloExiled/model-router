@@ -4,11 +4,10 @@
 #
 # What it does:
 #   1. Checks prerequisites (docker, nvidia-smi, python3, nvidia-docker runtime).
-#   2. Ensures Docker images for every stack:
-#        ninfer-4090:sm89                     (built from ~/Projetos/ThirdParty/ninfer-4090)
+#   2. Ensures Docker images for both stacks:
 #        ghcr.io/ggml-org/llama.cpp:server-cuda  (pulled from ghcr.io)
 #        bonsai-llama-4090:sm89               (built from bonsai-stack/llama.cpp submodule)
-#   3. Checks model artifacts for all three stacks (see scripts/download-models.sh).
+#   3. Checks model artifacts for both stacks (see scripts/download-models.sh).
 #   4. Installs systemd user unit: model-router.service
 #   5. Starts/enables the router so model serving works on demand.
 #   6. Verifies /health and runs each stack's check.sh.
@@ -18,7 +17,7 @@
 # Manual steps NOT covered (must be done once per machine):
 #   - Install Docker CE + nvidia-container-toolkit
 #   - Add user to docker group: sudo usermod -aG docker $USER
-#   - Download model artifacts (~48 GB total): scripts/download-models.sh all
+#   - Download model artifacts (~40 GB total): scripts/download-models.sh all
 set -euo pipefail
 export LC_ALL=C LC_NUMERIC=C
 
@@ -34,16 +33,14 @@ resolve_stack() {
   if [[ -d "${ROOT_DIR}/$1" ]]; then printf '%s' "${ROOT_DIR}/$1"
   else printf '%s' "${PARENT_DIR}/$1"; fi
 }
-NINFER_STACK="$(resolve_stack ninfer-stack)"
 GGUF_STACK="$(resolve_stack gguf-stack)"
 BONSAI_STACK="$(resolve_stack bonsai-stack)"
 MODEL_ROUTER="${ROOT_DIR}"
 
-NINFER_FORK="${NINFER_FORK:-${PARENT_DIR}/../ThirdParty/ninfer-4090}"
 BONSAI_IMAGE="${NINFER_BONSAI_IMAGE:-bonsai-llama-4090:sm89}"
 
 ROUTER_PORT="${MODEL_ROUTER_PORT:-18089}"
-BACKEND_PORT="${NINFER_BACKEND_PORT:-8080}"
+BACKEND_PORT="${MODEL_ROUTER_BACKEND_PORT:-8080}"
 IDLE_SEC="${MODEL_ROUTER_IDLE_SEC:-900}"
 
 UNIT_DIR="${HOME}/.config/systemd/user"
@@ -129,17 +126,6 @@ if ! docker image inspect "${LLAMA_IMAGE}" >/dev/null 2>&1; then
   docker pull "${LLAMA_IMAGE}"
 fi
 
-if ! docker image inspect ninfer-4090:sm89 >/dev/null 2>&1; then
-  if [[ ! -d "${NINFER_FORK}" ]]; then
-    printf 'error: ninfer fork not found at %s\n' "${NINFER_FORK}" >&2
-    printf '       Clone it: git clone https://github.com/UDPSendToFailed/ninfer-4090.git %s\n' "${NINFER_FORK}" >&2
-    printf '       Or set NINFER_FORK=/path/to/ninfer-4090 and re-run.\n' >&2
-    exit 1
-  fi
-  log "Building ninfer-4090:sm89 (this takes 15-30 min)..."
-  ( cd "${NINFER_FORK}" && docker build -t ninfer-4090:sm89 . )
-fi
-
 # Bonsai: PrismML fork of llama.cpp, built from the submodule at the tagged
 # gitlink. Stock llama.cpp cannot load the ternary packs and would emit
 # garbage, so the label gate below is mandatory, not cosmetic.
@@ -163,14 +149,13 @@ if [[ -z "$(docker image inspect \
 fi
 
 docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}' \
-  | grep -E 'ninfer-4090|llama.cpp|bonsai' || true
+  | grep -E 'llama.cpp|bonsai' || true
 
 # ---------------------------------------------------------------------------
 # 3. Model artifacts check
 # ---------------------------------------------------------------------------
 log "Checking model artifacts..."
 
-NINFER_MODEL="${NINFER_STACK}/models/qwen3_8_27b.ninfer"
 GGUF_BASE="${GGUF_STACK}/models/Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf"
 GGUF_MTP="${GGUF_STACK}/models/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf"
 GGUF_MM="${GGUF_STACK}/models/mmproj-Qwen3.8-27B-BF16.gguf"
@@ -182,7 +167,6 @@ missing() {
   printf 'warning: %s not found: %s\n' "$1" "$2" >&2
   MISSING=1
 }
-[[ -f "${NINFER_MODEL}" ]] || missing "ninfer model" "${NINFER_MODEL}"
 [[ -f "${GGUF_BASE}" ]] || missing "GGUF base model" "${GGUF_BASE}"
 [[ -f "${GGUF_MTP}" ]] || missing "GGUF MTP draft" "${GGUF_MTP}"
 [[ -f "${GGUF_MM}" ]] || missing "GGUF vision projector" "${GGUF_MM}"
@@ -191,9 +175,9 @@ missing() {
 
 if [[ "${MISSING}" -eq 1 ]]; then
   printf '\n' >&2
-  printf 'Download the missing artifacts (~48 GB for all three stacks):\n' >&2
+  printf 'Download the missing artifacts (~40 GB for both stacks):\n' >&2
   printf '  %s/scripts/download-models.sh all\n' "${ROOT_DIR}" >&2
-  printf '  # or one stack: ninfer | ninfer-vision | gguf | bonsai\n' >&2
+  printf '  # or one stack: gguf | bonsai\n' >&2
 fi
 
 # ---------------------------------------------------------------------------
@@ -210,15 +194,13 @@ Description=Model router (RTX 4090)
 Type=simple
 WorkingDirectory=${ROOT_DIR}
 ExecStart=/usr/bin/python3 ${ROOT_DIR}/model-router.py
-Environment=NINFER_SERVE_SH=${NINFER_STACK}/serve.sh
-Environment=LLAMA_SERVE_SH=${GGUF_STACK}/serve-llama.sh
-Environment=BONSAI_SERVE_SH=${BONSAI_STACK}/serve-bonsai.sh
-Environment=NINFER_MODEL_DIR=${NINFER_STACK}/models
+Environment=MODEL_ROUTER_LLAMA_SERVE_SH=${GGUF_STACK}/serve-llama.sh
+Environment=MODEL_ROUTER_BONSAI_SERVE_SH=${BONSAI_STACK}/serve-bonsai.sh
 Environment=NINFER_GGUF_DIR=${GGUF_STACK}/models
 Environment=NINFER_BONSAI_DIR=${BONSAI_STACK}/models
 Environment=NINFER_BONSAI_IMAGE=${BONSAI_IMAGE}
 Environment=MODEL_ROUTER_PORT=${ROUTER_PORT}
-Environment=NINFER_BACKEND_PORT=${BACKEND_PORT}
+Environment=MODEL_ROUTER_BACKEND_PORT=${BACKEND_PORT}
 Environment=MODEL_ROUTER_IDLE_SEC=${IDLE_SEC}
 Restart=on-failure
 RestartSec=5
@@ -255,7 +237,6 @@ done
 # ---------------------------------------------------------------------------
 log "Running stack validation checks..."
 bash "${ROOT_DIR}/check.sh" 2>&1 | tail -1
-bash "${NINFER_STACK}/check.sh" 2>&1 | tail -1
 bash "${GGUF_STACK}/check.sh" 2>&1 | tail -1
 bash "${BONSAI_STACK}/check.sh" 2>&1 | tail -1
 
@@ -270,16 +251,11 @@ echo "Unit:     systemctl --user {start,stop,status} model-router.service"
 echo "Logs:     journalctl --user -u model-router.service -f"
 echo
 echo "Stacks:"
-echo "  ninfer-stack: ${NINFER_STACK}"
 echo "  gguf-stack:   ${GGUF_STACK}"
 echo "  bonsai-stack: ${BONSAI_STACK}"
 echo "  model-router: ${ROOT_DIR}"
 echo
 echo "Pick a model in OpenCode:"
-echo "  ninfer/qwen3.8-27b-64k    (64K ctx, int8)"
-echo "  ninfer/qwen3.8-27b-128k   (128K ctx, rk8v4)"
-echo "  ninfer/qwen3.8-27b-192k   (192K ctx, rk4v4-e8)"
-echo "  ninfer/qwen3.8-27b-256k   (256K ctx, rk2v4-e8)"
 echo "  llama.cpp/qwen3.8-gguf-speed   (64K, MTP, 92 tok/s)"
 echo "  llama.cpp/qwen3.8-gguf-range   (96K ctx)"
 echo "  llama.cpp/qwen3.8-gguf-max     (256K ctx)"
@@ -296,10 +272,9 @@ echo "  prism/bonsai-2-27b-penta128 (ternary, 5x128K)"
 echo "  prism/bonsai-2-27b-hexa128  (ternary, 6x128K, max 128K)"
 echo "  prism/bonsai-2-27b-octo64   (ternary, 8x64K)"
 echo "  prism/bonsai-2-27b-vision   (ternary, 64K + mmproj)"
-echo "  ninfer/qwen3.6-35b-vision     (35B vision, introspect images)"
 echo
 echo "Run in the foreground (debugging, no systemd):"
 echo "  ${ROOT_DIR}/scripts/run-router.sh"
 echo
-echo "Tip: images in chat auto-trigger the vision backend; after IDLE_SEC"
+echo "Tip: images in chat load mmproj on the same tier; after IDLE_SEC"
 echo "(${IDLE_SEC}s) of no requests the backend stops to free VRAM."

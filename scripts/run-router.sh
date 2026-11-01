@@ -25,7 +25,7 @@ stack() {
 }
 
 port="${MODEL_ROUTER_PORT:-18089}"
-backend_port="${NINFER_BACKEND_PORT:-8080}"
+backend_port="${MODEL_ROUTER_BACKEND_PORT:-8080}"
 idle="${MODEL_ROUTER_IDLE_SEC:-900}"
 
 while (( $# )); do
@@ -60,20 +60,20 @@ if command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
   printf 'warning: docker is not reachable; the router will start but cannot boot a backend\n' >&2
 fi
 
-export NINFER_SERVE_SH="${NINFER_SERVE_SH:-$(stack ninfer-stack)/serve.sh}"
-export LLAMA_SERVE_SH="${LLAMA_SERVE_SH:-$(stack gguf-stack)/serve-llama.sh}"
-export BONSAI_SERVE_SH="${BONSAI_SERVE_SH:-$(stack bonsai-stack)/serve-bonsai.sh}"
-export NINFER_MODEL_DIR="${NINFER_MODEL_DIR:-$(stack ninfer-stack)/models}"
+export MODEL_ROUTER_LLAMA_SERVE_SH="${MODEL_ROUTER_LLAMA_SERVE_SH:-$(stack gguf-stack)/serve-llama.sh}"
+export MODEL_ROUTER_BONSAI_SERVE_SH="${MODEL_ROUTER_BONSAI_SERVE_SH:-$(stack bonsai-stack)/serve-bonsai.sh}"
+# Artifact dirs and image names stay on the NINFER_* names they ship with:
+# the serve scripts in gguf-stack/ and bonsai-stack/ read them.
 export NINFER_GGUF_DIR="${NINFER_GGUF_DIR:-$(stack gguf-stack)/models}"
 export NINFER_BONSAI_DIR="${NINFER_BONSAI_DIR:-$(stack bonsai-stack)/models}"
 export NINFER_BONSAI_IMAGE="${NINFER_BONSAI_IMAGE:-bonsai-llama-4090:sm89}"
 export MODEL_ROUTER_PORT="$port"
-export NINFER_BACKEND_PORT="$backend_port"
+export MODEL_ROUTER_BACKEND_PORT="$backend_port"
 export MODEL_ROUTER_IDLE_SEC="$idle"
 
 printf 'router:  http://127.0.0.1:%s (backend :%s, idle %ss)\n' \
   "$port" "$backend_port" "$idle"
-printf 'logs:    this terminal; backend boot log: ~/.local/share/ninfer/ninfer-backend-boot.log\n'
+printf 'logs:    this terminal; backend boot log: ~/.local/share/model-router/backend-boot.log\n'
 printf 'stop:    Ctrl-C\n\n'
 
 exec python3 "$root/model-router.py"

@@ -33,7 +33,6 @@ import uuid
 BACKEND_IMAGES = (
     "ghcr.io/ggml-org/llama.cpp:server-cuda",
     "bonsai-llama-4090",
-    "ninfer-4090",
 )
 
 

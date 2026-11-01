@@ -36,19 +36,7 @@ def main():
     nr = load()
 
     for name, want in {
-        "qwen3.8-27b": ("balanced", None),
-        "qwen3.8-27b-low": ("balanced", "low"),
-        "qwen3.8-27b-64k-xhigh": ("c1", "xhigh"),
-        "qwen3.8-27b-max": ("max", None),
-        "qwen3.8-27b-max-medium": ("max", "medium"),
-        "qwen3.8-27b-192k": ("max", None),
-        "qwen3.8-27b-192k-low": ("max", "low"),
-        "qwen3.8-27b-256k-xhigh": ("ultra", "xhigh"),
-        "qwen3.8-27b-256k": ("ultra", None),
-        "qwen3.8-27b-128k-medium": ("balanced", "medium"),
-        "qwen3.8-27b-128k-minimal": ("balanced", "minimal"),
-        "qwen3.6-35b-vision": ("vision", None),
-        "qwen3.6-35b-vision-low": ("vision", "low"),
+        "qwen3.8-gguf": ("gguf-range", None),
         "qwen3.8-gguf-speed": ("gguf-speed", None),
         "qwen3.8-gguf-range-xhigh": ("gguf-range", "xhigh"),
         "qwen3.8-gguf-max": ("gguf-max", None),
@@ -67,6 +55,10 @@ def main():
         "bonsai-2-27b-duo128": ("bonsai-duo128", None),
         "bonsai-2-27b-vision": ("bonsai-vision", None),
         "bonsai-quad128": ("bonsai-quad128", None),
+        # Unknown names must not silently pick weights: the general-purpose
+        # Qwen tier is the only safe fallback.
+        "mystery-model": ("gguf-range", None),
+        "mystery-model-low": ("gguf-range", "low"),
     }.items():
         check(f"parse:{name}", nr.parse_model(name), want)
 
@@ -92,16 +84,6 @@ def main():
                 out.get("reasoning_budget_tokens", "<ABSENT>"))
 
     for label, args, want in [
-        ("vision-suffix-dropped", ("qwen3.6-35b-vision-low",),
-         ("vision", "<ABSENT>", "<ABSENT>")),
-        ("vision-explicit-low-dropped", ("qwen3.6-35b-vision", "hi", "low"),
-         ("vision", "<ABSENT>", "<ABSENT>")),
-        ("vision-none-kept", ("qwen3.6-35b-vision", "hi", "none"),
-         ("vision", "none", "<ABSENT>")),
-        ("vision-budget-dropped",
-         ("qwen3.6-35b-vision", "hi", "low",
-          {"reasoning_budget_tokens": 4096}),
-         ("vision", "<ABSENT>", "<ABSENT>")),
         ("low-is-budgeted", ("qwen3.8-gguf-max-low",),
          ("gguf-max", "medium", 2048)),
         ("medium-budget", ("qwen3.8-gguf-max-medium",),
@@ -124,15 +106,19 @@ def main():
          ("gguf-max", "<ABSENT>", "<ABSENT>")),
         ("unsupported-dropped", ("qwen3.8-gguf-max", "hi", "max"),
          ("gguf-max", "<ABSENT>", "<ABSENT>")),
-        ("ninfer-no-budget", ("qwen3.8-27b-128k-low",),
-         ("balanced", "medium", "<ABSENT>")),
-        ("reuse-ninfer-no-budget",
-         ("qwen3.8-gguf-max-low", "hi", None, None, "balanced"),
-         ("balanced", "medium", "<ABSENT>")),
-        ("media-forces-vision", ("qwen3.8-27b-128k", [img]),
-         ("vision", "<ABSENT>", "<ABSENT>")),
-        ("plain-untouched", ("qwen3.8-27b-256k",),
-         ("ultra", "<ABSENT>", "<ABSENT>")),
+        ("unknown-tier-budget", ("mystery-model-low",),
+         ("gguf-range", "medium", 2048)),
+        # The budget follows the RESIDENT tier, not the requested name: low
+        # on Bonsai is 4096, not the Qwen 2048.
+        ("reuse-budget-follows-tier",
+         ("qwen3.8-gguf-max-low", "hi", None, None, "bonsai-max"),
+         ("bonsai-max", "medium", 4096)),
+        # Media stays on the requested tier now that every backend carries the
+        # encoder: no more 35B vision tier.
+        ("media-keeps-tier", ("qwen3.8-gguf-range", [img]),
+         ("gguf-range", "<ABSENT>", "<ABSENT>")),
+        ("plain-untouched", ("qwen3.8-gguf-max",),
+         ("gguf-max", "<ABSENT>", "<ABSENT>")),
         # Bonsai carries a higher safety net: it reasons ~1.7x longer than
         # Qwen on the same prompt (measured 730-4242 tokens vs 675-2424).
         ("bonsai-low-budget", ("bonsai-2-27b-quad128-low",),
@@ -172,11 +158,11 @@ def main():
          ("qwen3.8-gguf-max-low", None,
           {"thinking": {"type": "disabled"}}),
          ("gguf-max", "<ABSENT>", "<ABSENT>", "<ABSENT>", False)),
-        ("ninfer-skipped", ("qwen3.8-27b-128k-low",),
-         ("balanced", "<ABSENT>", "<ABSENT>", "<ABSENT>", False)),
-        ("reuse-ninfer-skipped",
-         ("qwen3.8-gguf-max-low", None, None, "balanced"),
-         ("balanced", "<ABSENT>", "<ABSENT>", "<ABSENT>", False)),
+        ("bonsai-low-messages", ("bonsai-2-27b-quad128-low",),
+         ("bonsai-quad128", "medium", True, 4096, True)),
+        ("reuse-budget-follows-tier",
+         ("qwen3.8-gguf-max-low", None, None, "bonsai-max"),
+         ("bonsai-max", "medium", True, 4096, True)),
     ]:
         check(f"messages:{label}", messages(*args), want)
 
@@ -185,17 +171,30 @@ def main():
           nr.route_request({"model": "bonsai-2-27b-octo64",
                             "messages": [{"role": "user", "content": [img]}]}),
           ("bonsai-octo64", None, True, ["media wants mmproj"]))
+    check("route:gguf-media-lazy-mmproj",
+          nr.route_request({"model": "qwen3.8-gguf-max",
+                            "messages": [{"role": "user", "content": [img]}]}),
+          ("gguf-max", None, True, ["media wants mmproj"]))
+    check("route:text-no-mmproj",
+          nr.route_request({"model": "qwen3.8-gguf-max",
+                            "messages": [{"role": "user", "content": "hi"}]}),
+          ("gguf-max", None, False, []))
 
     E = nr.effective_profile
     for label, w, c, e, m, want in [
-        ("same", "balanced", "balanced", 1000, False, "balanced"),
-        ("reuse-smaller", "ultra", "balanced", 1000, False, "balanced"),
-        ("overflow-switches", "ultra", "balanced", 120000, False, "ultra"),
-        ("reuse-bigger", "balanced", "ultra", 1000, False, "ultra"),
-        ("nothing-running", "balanced", None, 1000, False, "balanced"),
-        ("media-to-vision", "vision", "balanced", 1000, True, "vision"),
-        ("vision-fits-stays", "balanced", "vision", 1000, False, "vision"),
-        ("vision-overflow-leaves", "balanced", "vision", 16000, False, "balanced"),
+        ("same", "gguf-range", "gguf-range", 1000, False, "gguf-range"),
+        ("reuse-smaller", "gguf-max", "gguf-range", 1000, False, "gguf-range"),
+        ("overflow-switches", "gguf-max", "gguf-range", 120000, False,
+         "gguf-max"),
+        ("reuse-bigger", "gguf-range", "gguf-max", 1000, False, "gguf-max"),
+        ("nothing-running", "gguf-range", None, 1000, False, "gguf-range"),
+        # Media never forces a tier switch: every tier carries mmproj lazily.
+        ("media-stays-on-tier", "gguf-max", "gguf-range", 1000, True,
+         "gguf-range"),
+        ("gguf-vision-fits-stays", "gguf-range", "gguf-vision", 1000, False,
+         "gguf-vision"),
+        ("gguf-vision-overflow-leaves", "gguf-range", "gguf-vision", 60000,
+         False, "gguf-range"),
         # Slot-aware reuse: a resident 1-slot backend must not swallow a
         # multi-slot tier, and a wider tier still serves the narrower one.
         ("slots-block-reuse", "gguf-duo128", "gguf-range", 1000, False,
@@ -247,10 +246,6 @@ def main():
          False, "bonsai-quad128"),
         ("family-switch-bonsai-to-gguf", "gguf-range", "bonsai-max", 1000,
          False, "gguf-range"),
-        ("family-switch-ninfer-to-gguf", "gguf-range", "balanced", 1000, False,
-         "gguf-range"),
-        ("family-switch-ninfer-to-bonsai", "bonsai-max", "ultra", 1000, False,
-         "bonsai-max"),
     ]:
         check(f"reuse:{label}", E(w, c, e, m), want)
 
@@ -259,14 +254,14 @@ def main():
     # sessions do not reboot the backend on every turn.
     S = nr.same_backend
     for label, cn, cm, p, wm, want in [
-        ("exact-text", "balanced", False, "balanced", False, True),
+        ("exact-text", "gguf-range", False, "gguf-range", False, True),
         ("encoder-added-reboots", "gguf-max", False, "gguf-max", True, False),
         ("encoder-kept-reuses", "gguf-max", True, "gguf-max", True, True),
         ("encoder-kept-for-text", "gguf-max", True, "gguf-max", False, True),
         ("bonsai-encoder-kept-for-text", "bonsai-trio256", True,
          "bonsai-trio256", False, True),
-        ("tier-differs", "balanced", False, "ultra", False, False),
-        ("nothing-running", None, False, "balanced", False, False),
+        ("tier-differs", "gguf-range", False, "gguf-max", False, False),
+        ("nothing-running", None, False, "gguf-range", False, False),
     ]:
         check(f"same:{label}", S(cn, cm, p, wm), want)
 
@@ -309,8 +304,6 @@ def main():
         ("bonsai-no-alias-octo",
          "-m /models/Ternary-Bonsai-2-27B-PTQ1_0.gguf --parallel 8",
          "bonsai-octo64"),
-        ("ninfer-131072", "--max-context 131072 --kv-dtype rk8v4", "balanced"),
-        ("ninfer-eq-262144", "--max-context=262144", "ultra"),
         ("unknown", "--foo bar", None),
         ("empty", "", None),
     ]:
@@ -415,12 +408,12 @@ def main():
             check(f"effortpol:{fam}-{tier}-meta",
                   bool(meta.get("injected_budget")), budget is not None)
 
-    for tier in ("low", "medium", "high", "xhigh"):
-        d, meta, notes = {"model": "x"}, {}, []
-        P(d, "/v1/chat/completions", tier, "ninfer", meta, notes)
-        check(f"effortpol:ninfer-no-cap-{tier}", "reasoning_budget_tokens" in d, False)
-        check(f"effortpol:ninfer-no-msg-{tier}",
-              "reasoning_budget_message" in d, False)
+    # An unknown family (no launcher matched) still gets the gguf safety net:
+    # running uncapped by accident is worse than a generous cap.
+    d, meta, notes = {"model": "x"}, {}, []
+    P(d, "/v1/chat/completions", "low", None, meta, notes)
+    check("effortpol:unknown-family-cap",
+          d.get("reasoning_budget_tokens"), 2048)
 
     d, meta, notes = {"reasoning_budget_tokens": 999,
                       "reasoning_budget_message": "mine"}, {}, []
@@ -442,17 +435,15 @@ def main():
     # ---- route_request: direct coverage of all branches ----
     Q = nr.route_request
     for label, d, want in [
-        ("text-plain", {"model": "qwen3.8-27b-128k"}, ("balanced", None, False, [])),
+        ("text-plain", {"model": "qwen3.8-gguf-range"}, ("gguf-range", None, False, [])),
         ("gguf-vision-media", {"model": "qwen3.8-gguf-vision", "messages": [{"content": [img]}]}, ("gguf-vision", None, True, ["media wants mmproj"])),
         ("gguf-range-media", {"model": "qwen3.8-gguf-range", "messages": [{"content": [img]}]}, ("gguf-range", None, True, ["media wants mmproj"])),
-        ("vision-media-stays", {"model": "qwen3.6-35b-vision", "messages": [{"content": [img]}]}, ("vision", None, False, [])),
-        ("ninfer-media-forces", {"model": "qwen3.8-27b-128k", "messages": [{"content": [img]}]}, ("vision", None, False, ["media forces vision"])),
-        ("ninfer-media-none-effort", {"model": "qwen3.8-27b-128k-none", "messages": [{"content": [img]}]}, ("vision", "none", False, ["media forces vision"])),
+        ("vision-media-lazy", {"model": "qwen3.8-gguf-vision", "messages": [{"content": [img]}]}, ("gguf-vision", None, True, ["media wants mmproj"])),
         ("gguf-vision-no-media", {"model": "qwen3.8-gguf-vision"}, ("gguf-vision", None, True, [])),
         ("bonsai-vision-no-media", {"model": "bonsai-2-27b-vision"}, ("bonsai-vision", None, True, [])),
         ("bonsai-media-lazy", {"model": "bonsai-2-27b-octo64", "messages": [{"content": [img]}]}, ("bonsai-octo64", None, True, ["media wants mmproj"])),
-        ("unknown-model", {"model": "foo"}, ("balanced", None, False, [])),
-        ("unknown-with-media", {"model": "foo", "messages": [{"content": [img]}]}, ("vision", None, False, ["media forces vision"])),
+        ("unknown-model", {"model": "foo"}, ("gguf-range", None, False, [])),
+        ("unknown-with-media", {"model": "foo", "messages": [{"content": [img]}]}, ("gguf-range", None, True, ["media wants mmproj"])),
     ]:
         check(f"route:{label}", Q(d), want)
     
@@ -489,7 +480,18 @@ def main():
         os.environ.update(orig_env)
         import shutil
         shutil.rmtree(dump_dir, ignore_errors=True)
-    
+
+    # ---- table invariants: a profile missing from one table silently changes
+    # routing (e.g. no window -> never reused, no VISION_CAPABLE -> media
+    # reboots a whole tier). Keep the tables in lockstep. ----
+    check("inv:profiles-window", nr.PROFILES - set(nr.PROFILE_WINDOWS), set())
+    check("inv:profiles-slots", nr.PROFILES - set(nr.PROFILE_SLOTS), set())
+    check("inv:profiles-family",
+          {p for p in nr.PROFILES if nr.family(p) is None}, set())
+    check("inv:profiles-vision", nr.PROFILES - nr.VISION_CAPABLE, set())
+    check("inv:gguf-files", set(nr.GGUF_FILES) - nr.PROFILES, set())
+    check("inv:bonsai-files", set(nr.BONSAI_FILES) - nr.PROFILES, set())
+
     if FAILURES:
         print(f"\n{len(FAILURES)} FAILURES")
         sys.exit(1)

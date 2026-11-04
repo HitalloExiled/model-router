@@ -456,7 +456,78 @@ def main():
     check("digest-len-8", len(D(m0)), 8)
     check("digest-order", D(m1), D({"role": "user", "content": "hi", "x": 1}))
     check("digest-unicode-order", D({"role": "assistant", "content": "áçë", "tool_calls": []}), D({"tool_calls": [], "role": "assistant", "content": "áçë"}))
-    
+
+    # ---- prefill gate prefix predictor: only the final message may differ
+    # between a hot continuation and a cold prompt. ----
+    p1 = {"model": "x", "stream": True, "messages": [
+        {"role": "system", "content": "rules"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "answer"},
+    ]}
+    p2 = dict(p1)
+    p2["messages"] = p1["messages"] + [
+        {"role": "user", "content": "different next"}]
+    p3 = dict(p2)
+    p3["messages"] = p1["messages"] + [
+        {"role": "user", "content": "another next"}]
+    check("gate-prefix-same", nr.prompt_prefix_key(p2),
+          nr.prompt_prefix_key(p3))
+    check("gate-prefix-empty", nr.prompt_prefix_key({"messages": []}), None)
+    nr.recent_prefixes.clear()
+    check("gate-cold-before-admit", nr.prompt_is_hot(p1), False)
+    nr.remember_prompt_prefix(p1)
+    check("gate-hot-after-admit", nr.prompt_is_hot(p2), True)
+
+    # ---- gate policy: pure decision, no backend/docker needed ----
+    check("gate:pass-idle", nr.gate_decision(False, False, True), None)
+    check("gate:pass-warm-big", nr.gate_decision(False, True, False), None)
+    check("gate:pass-small-cold", nr.gate_decision(False, True, False), None)
+    check("gate:hold-prefill", nr.gate_decision(True, False, False),
+          "prefill")
+    check("gate:hold-prefill-wins", nr.gate_decision(True, True, True),
+          "prefill")
+    check("gate:hold-cold-vs-decode", nr.gate_decision(False, True, True),
+          "cold-vs-decode")
+
+    # ---- /slots phase classification: samples measured on trio200 ----
+    # Decoding: cache 87.873, 213 processed, 154 tokens sampled.
+    live = {"id": 2, "is_processing": True, "n_prompt_tokens": 88240,
+            "n_prompt_tokens_cache": 87873, "n_prompt_tokens_processed": 213,
+            "next_token": [{"has_next_token": True, "n_decoded": 154}]}
+    check("slots:next-token", nr.next_token_info(live), (154, True))
+    check("slots:no-next-token", nr.next_token_info({"next_token": []}),
+          (0, False))
+    check("slots:bad-next-token", nr.next_token_info({"next_token": ["x"]}),
+          (0, False))
+    dec = nr.slot_phase(live)
+    check("slots:decode-generating", dec["generating"], True)
+    check("slots:decode-not-prefilling", dec["prefilling"], False)
+    check("slots:decode-prompt-len", dec["prompt_len"], 88086)
+
+    # Prefilling: the whole 10.1k prompt reported as 2048/4096/... because
+    # n_prompt_tokens only covers KV cache + the queued batch, and no token
+    # has been sampled yet. This is the sample the old `rest > 2048` rule
+    # misread as idle.
+    pre = {"id": 1, "is_processing": True, "n_prompt_tokens": 4096,
+           "n_prompt_tokens_cache": 0, "n_prompt_tokens_processed": 2048,
+           "next_token": [{"has_next_token": False, "n_decoded": 0}]}
+    p = nr.slot_phase(pre)
+    check("slots:prefill-detected", p["prefilling"], True)
+    check("slots:prefill-not-generating", p["generating"], False)
+    check("slots:prefill-in-flight", p["in_flight"], 4096)
+
+    # Warm continuation: most of the prompt is cached, so the slot is only
+    # working on a handful of new tokens -> not a prefill worth gating on.
+    warm = {"id": 0, "is_processing": True, "n_prompt_tokens": 87400,
+            "n_prompt_tokens_cache": 87200, "n_prompt_tokens_processed": 0,
+            "next_token": [{"has_next_token": False, "n_decoded": 0}]}
+    check("slots:warm-short-not-prefill", nr.slot_phase(warm)["prefilling"],
+          False)
+    idle = nr.slot_phase({"id": 3, "is_processing": False})
+    check("slots:idle-not-prefill", (idle["prefilling"],
+                                     idle["generating"]), (False, False))
+    check("slots:not-a-dict", nr.slot_phase("x"), None)
+
     # debug_prompt: env-gated forensics (digest log + optional raw body file);
     # must not touch the request path or raise.
     orig_env = dict(os.environ)

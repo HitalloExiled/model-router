@@ -88,3 +88,40 @@ text requests, so a mixed text/image session does not reboot a 20+ GiB
 multi-slot backend (and pay a full re-prefill) on every turn. Only a media
 request against a text-only backend triggers a reboot, to add the encoder.
 
+## Admission gate (prefill vs decode)
+
+A single large prefill blocks decode on every other slot for its whole
+duration (`ceil(prompt / n_batch)` stalls), and two prefills running at the
+same time pay a large throughput penalty on mixed-sequence attention. The
+router decides *when* to hand a request over. The vendored llama.cpp is not
+patched; this is router side only and fail-open.
+
+Two rules, both measured from `/slots`:
+
+- **phase A** (enforced) — an arrival waits while another slot is still
+  prefilling. A slot counts as prefilling when it is processing a task of its
+  own with at least `MODEL_ROUTER_PREFILL_GATE_MIN` (default 1024) prompt
+  tokens in flight and no token sampled yet. `n_prompt_tokens` on its own is
+  not enough: llama.cpp reports only the KV cache plus the batch queued for
+  the next step, so during a prefill it grows 2048, 4096, ... instead of
+  showing the whole prompt;
+- **phase B** (opt-in, `MODEL_ROUTER_PREFILL_GATE_COLD=1`) — a *cold* large
+  prompt (not a continuation of something just admitted,
+  `>= MODEL_ROUTER_PREFILL_GATE_COLD_MIN`, default 8192 tokens) waits while
+  any slot is decoding.
+
+Phase A is on by default because it is a real win: with two concurrent
+~10.7k-token cold prefills, the in-flight request finishes in 3.7 s instead of
+7.6 s, and the queued one takes 8.5 s instead of 8.0 s. Phase B is off
+because, with a long-lived decoder (the agent session itself), it waits out
+the whole timeout and then admits the request into the same stall: no
+throughput, only latency. `MODEL_ROUTER_PREFILL_GATE_ENFORCE=0` puts the gate
+in shadow mode (log only).
+
+Warm continuations are detected by hashing the request without its final
+message: if that prefix was admitted recently, the turn is a cache hit and is
+never held. Diagnostics are quiet by default (only holds are logged);
+`MODEL_ROUTER_PREFILL_GATE_DIAG_VERBOSE=1` logs every admission, and
+`MODEL_ROUTER_PREFILL_GATE_TIMEOUT` (default 10 s) bounds the wait so a stuck
+prefill can never turn the router into a queue.
+

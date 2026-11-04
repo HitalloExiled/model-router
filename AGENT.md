@@ -57,3 +57,10 @@ Guidance for coding agents working in this repository.
   Bonsai weights — that silently changes the model under the client.
 - The router prefers the running backend over the requested tier to avoid
   a full re-prefill. A tier switch invalidates the prefix cache.
+- The admission gate (`admit_prefill`) serializes arrivals behind an in-flight
+  prefill so two prefills never interleave. It reads `/slots`, where
+  `n_prompt_tokens` is **not** the prompt length: it is the KV cache for the
+  task plus the batch queued for the next step, so it grows 2048, 4096, ...
+  while a 100k-token prompt prefills. Prefill is `is_processing` with no token
+  sampled yet and no tokens decoded; never infer it from a prompt-length
+  subtraction. The gate is fail-open and must never be able to fail a request.

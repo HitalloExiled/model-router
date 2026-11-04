@@ -19,6 +19,12 @@ Env:
   MODEL_ROUTER_LLAMA_SERVE_SH / MODEL_ROUTER_BONSAI_SERVE_SH (launchers)
   NINFER_LLAMA_IMAGE / NINFER_BONSAI_IMAGE (shared with the serve scripts)
   MODEL_ROUTER_DIGEST=1 / MODEL_ROUTER_DUMP=<dir> (prefix-cache forensics)
+  MODEL_ROUTER_PREFILL_GATE=0 (disable the admission gate entirely)
+  MODEL_ROUTER_PREFILL_GATE_ENFORCE=0 (diagnose only; phase A is enforced)
+  MODEL_ROUTER_PREFILL_GATE_TIMEOUT / _POLL / _MIN / _COLD_MIN
+  MODEL_ROUTER_PREFILL_GATE_COLD=1 (also hold cold prompts behind a decoder)
+  MODEL_ROUTER_PREFILL_GATE_DIAG=0 (silence gate diagnostics)
+  MODEL_ROUTER_PREFILL_GATE_DIAG_VERBOSE=1 (log every admission, not just holds)
 """
 import hashlib
 import http.client
@@ -27,6 +33,7 @@ import os
 import subprocess
 import threading
 import time
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROUTER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -138,6 +145,46 @@ LLAMA_ALL = GGUF_ALL | BONSAI_ALL
 # Set MODEL_ROUTER_RESPECT_SLOTS=0 to restore blind tier reuse.
 RESPECT_SLOTS = os.environ.get("MODEL_ROUTER_RESPECT_SLOTS", "1") != "0"
 
+# Admission-balance gate for mixed decode/prefill workloads. Deliberately
+# router-side: the vendored llama.cpp is never patched.
+#
+# Phase A ("hold an arrival while another slot is mid-prefill") is enforced by
+# default. Measured on trio200 with two real concurrent ~10.7k-token cold
+# prefills: the in-flight request finished in 3.7 s instead of 7.6 s, while the
+# queued one went 8.0 s -> 8.5 s end to end. Total GPU work is unchanged; the
+# interleaved case just burns throughput on mixed-sequence attention.
+#
+# Phase B ("a cold prompt must not prefill while a slot decodes") is off by
+# default (`_COLD=0`). With a long-lived decoder - the agent session itself -
+# it waited out the whole timeout and then stalled the same decoder anyway, so
+# it bought no throughput, only latency.
+PREFILL_GATE = os.environ.get("MODEL_ROUTER_PREFILL_GATE", "1") != "0"
+PREFILL_GATE_ENFORCE = os.environ.get(
+    "MODEL_ROUTER_PREFILL_GATE_ENFORCE", "1") != "0"
+PREFILL_GATE_TIMEOUT = float(os.environ.get(
+    "MODEL_ROUTER_PREFILL_GATE_TIMEOUT", "10"))
+PREFILL_GATE_POLL = float(os.environ.get(
+    "MODEL_ROUTER_PREFILL_GATE_POLL", "0.5"))
+# A slot only counts as prefilling when it is working on at least this many
+# tokens of its own prompt. Below that a prefill lasts a single batch and
+# holding an arrival behind it would only add poll-interval latency.
+PREFILL_GATE_MIN = int(os.environ.get(
+    "MODEL_ROUTER_PREFILL_GATE_MIN", "1024"))
+PREFILL_GATE_COLD_MIN = int(os.environ.get(
+    "MODEL_ROUTER_PREFILL_GATE_COLD_MIN", "8192"))
+# Phase B is opt-in: set _COLD=1 to also hold cold prompts behind a decoder.
+PREFILL_GATE_COLD = os.environ.get(
+    "MODEL_ROUTER_PREFILL_GATE_COLD", "0") != "0"
+PREFILL_PREFIX_TTL = float(os.environ.get(
+    "MODEL_ROUTER_PREFILL_PREFIX_TTL", "3600"))
+PREFILL_PREFIX_MAX = int(os.environ.get(
+    "MODEL_ROUTER_PREFILL_PREFIX_MAX", "4096"))
+# Quiet by default: log only the decisions that actually hold a request.
+PREFILL_GATE_DIAG = os.environ.get(
+    "MODEL_ROUTER_PREFILL_GATE_DIAG", "1") != "0"
+PREFILL_GATE_DIAG_VERBOSE = os.environ.get(
+    "MODEL_ROUTER_PREFILL_GATE_DIAG_VERBOSE", "0") != "0"
+
 # Backend families. Reuse never crosses families: answering a qwen3.8-gguf-*
 # request from a resident Bonsai backend (or the reverse) returns a different
 # model than the client asked for, which is a correctness bug, not a cache
@@ -183,6 +230,13 @@ lock = threading.Lock()
 state = {"profile": None, "profile_mmproj": False, "busy": False,
          "last_used": 0.0, "active": 0,
          "current_model": None, "current_profile": None}
+# Admission-gate bookkeeping has its own lock: `lock` is held across a backend
+# boot (tens of seconds) and a request must never queue behind that just to
+# ask whether its prompt is warm.
+prefix_lock = threading.Lock()
+# Prefixes admitted recently.  An identical body except for its final message
+# is a continuation and should not be treated as a cold re-prefill.
+recent_prefixes = OrderedDict()
 
 
 def log(*a):
@@ -243,6 +297,8 @@ def stop_backend():
         sh("docker", "stop", *ids, timeout=120)
     state["profile"] = None
     state["profile_mmproj"] = False
+    with prefix_lock:
+        recent_prefixes.clear()
 
 
 def launch_command(profile, want_mmproj=False):
@@ -441,6 +497,224 @@ def message_digest(msg):
     """Short stable hash of one chat message, tool calls included."""
     raw = json.dumps(msg, ensure_ascii=False, sort_keys=True)
     return hashlib.sha1(raw.encode()).hexdigest()[:8]
+
+
+def prompt_prefix_key(decoded, profile=None):
+    """Hash the request prefix, omitting only the final chat message.
+
+    The final message normally changes on every turn; the preceding messages,
+    tools, and system prompt are what llama.cpp can reuse from its KV cache.
+    Keep this conservative: requests without a message prefix are always
+    considered cold.
+    """
+    messages = decoded.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return None
+    prefix = dict(decoded)
+    if profile:
+        # A tier switch/restart destroys the backend KV cache even when the
+        # chat prefix itself is identical.
+        prefix["_router_backend_profile"] = profile
+    prefix["messages"] = messages[:-1]
+    raw = json.dumps(prefix, ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":"))
+    return hashlib.sha1(raw.encode()).hexdigest()
+
+
+def prompt_request_key(decoded, profile=None):
+    """Hash the complete admitted request for the next turn's prefix match."""
+    messages = decoded.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return None
+    request = dict(decoded)
+    if profile:
+        request["_router_backend_profile"] = profile
+    raw = json.dumps(request, ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":"))
+    return hashlib.sha1(raw.encode()).hexdigest()
+
+
+def prompt_is_hot(decoded, profile=None):
+    """Return whether this request's reusable prefix was admitted recently."""
+    key = prompt_prefix_key(decoded, profile)
+    if key is None:
+        return False
+    now = time.monotonic()
+    with prefix_lock:
+        while recent_prefixes:
+            _, seen = next(iter(recent_prefixes.items()))
+            if now - seen <= PREFILL_PREFIX_TTL:
+                break
+            recent_prefixes.popitem(last=False)
+        seen = recent_prefixes.get(key)
+        if seen is None:
+            return False
+        recent_prefixes.move_to_end(key)
+        recent_prefixes[key] = now
+        return True
+
+
+def remember_prompt_prefix(decoded, profile=None):
+    # Store the complete admitted request: on the next turn, the client sends
+    # that conversation as the prefix and appends one new final message.
+    key = prompt_request_key(decoded, profile)
+    if key is None:
+        return
+    now = time.monotonic()
+    with prefix_lock:
+        recent_prefixes[key] = now
+        recent_prefixes.move_to_end(key)
+        while len(recent_prefixes) > PREFILL_PREFIX_MAX:
+            recent_prefixes.popitem(last=False)
+
+
+def next_token_info(slot):
+    """(n_decoded, has_next_token) for one /slots entry, defensively."""
+    nt = slot.get("next_token")
+    if not isinstance(nt, list) or not nt or not isinstance(nt[0], dict):
+        return 0, False
+    return int(nt[0].get("n_decoded") or 0), bool(nt[0].get("has_next_token"))
+
+
+def slot_phase(slot):
+    """Classify one /slots entry, or None when it is unusable.
+
+    llama.cpp does not expose the whole prompt length: `n_prompt_tokens` is
+    what already sits in the KV cache for this task plus the batch queued for
+    the next decode step. So `cache + processed` never reaches it and the only
+    reliable prefill signal is "processing, nothing sampled yet":
+
+      prefilling -- is_processing, no next token, 0 decoded, and enough of
+                    this task's own prompt in flight to matter;
+      generating -- is_processing and a token was sampled for it.
+
+    `in_flight` = n_prompt_tokens - cached is the part of this task that is
+    not reusable prefix (processed so far plus the queued batch).
+    """
+    if not isinstance(slot, dict):
+        return None
+    try:
+        sid = int(slot.get("id", -1))
+        proc = bool(slot.get("is_processing"))
+        decoded, has_next = next_token_info(slot)
+        n_prompt = int(slot.get("n_prompt_tokens") or 0)
+        cached = int(slot.get("n_prompt_tokens_cache") or 0)
+        processed = int(slot.get("n_prompt_tokens_processed") or 0)
+    except (TypeError, ValueError):
+        return None
+    prompt_len = max(0, n_prompt - decoded)
+    in_flight = max(0, n_prompt - cached)
+    queued = max(0, prompt_len - cached - processed)
+    prefilling = (proc and decoded == 0 and not has_next
+                  and in_flight >= PREFILL_GATE_MIN)
+    generating = proc and (has_next or decoded > 0)
+    return {"id": sid, "proc": proc, "decoded": decoded,
+            "n_prompt": n_prompt, "prompt_len": prompt_len,
+            "cached": cached, "processed": processed,
+            "in_flight": in_flight, "queued": queued,
+            "prefilling": prefilling, "generating": generating}
+
+
+def backend_slot_state():
+    """Return the backend's slot phases, or None when /slots is unavailable."""
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", BACKEND_PORT, timeout=3)
+        conn.request("GET", "/slots")
+        resp = conn.getresponse()
+        raw = resp.read(4 * 1024 * 1024)
+        conn.close()
+        if resp.status != 200:
+            return None
+        slots = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(slots, list):
+        return None
+    summary = []
+    for slot in slots:
+        phase = slot_phase(slot)
+        if phase is not None:
+            summary.append(phase)
+    return {"prefilling": any(s["prefilling"] for s in summary),
+            "generating": any(s["generating"] for s in summary),
+            "slots": summary}
+
+
+def gate_decision(prefilling, generating, cold_large):
+    """Why this admission should wait, or None to send it now.
+
+    Phase A: an arrival is held while another slot is still prefilling. Phase B
+    (opt-in): a cold large prompt is held while any slot is decoding, which is
+    the case that drops a co-tenant to ~1 t/s.
+    """
+    if prefilling:
+        return "prefill"
+    if cold_large and generating:
+        return "cold-vs-decode"
+    return None
+
+
+def admit_prefill(decoded, body, profile=None):
+    """Hold a request while another slot is prefilling (and optionally while a
+    slot is decoding a cold large prompt).
+
+    Best-effort by design: it must never fail a request. Any problem reading
+    the backend degrades to "send it now".
+    """
+    if not PREFILL_GATE or not isinstance(decoded, dict):
+        return
+    try:
+        est = len(body or b"") / 3.5
+        hot = prompt_is_hot(decoded, profile)
+        cold_large = (PREFILL_GATE_COLD and not hot
+                      and est >= PREFILL_GATE_COLD_MIN)
+        phase = backend_slot_state()
+        if phase is None:
+            if PREFILL_GATE_DIAG and PREFILL_GATE_DIAG_VERBOSE:
+                log(f"prefill gate diag slots=unavailable est={int(est)}")
+            return
+        reason = gate_decision(phase["prefilling"], phase["generating"],
+                               cold_large)
+        if PREFILL_GATE_DIAG and (reason or PREFILL_GATE_DIAG_VERBOSE):
+            slots = "; ".join(
+                f"s{sl['id']}:p={int(sl['proc'])},d={sl['decoded']},"
+                f"np={sl['n_prompt']},pl={sl['prompt_len']},"
+                f"c={sl['cached']},pp={sl['processed']},"
+                f"inflight={sl['in_flight']},queued={sl['queued']}"
+                for sl in phase["slots"])
+            log(f"prefill gate diag est={int(est)} hot={hot} "
+                f"cold={cold_large} prefilling={phase['prefilling']} "
+                f"generating={phase['generating']} "
+                f"would_block={reason is not None} reason={reason or 'pass'} "
+                f"slots=[{slots}]")
+        if reason and PREFILL_GATE_ENFORCE:
+            started = time.monotonic()
+            waited = False
+            while reason:
+                if time.monotonic() - started >= PREFILL_GATE_TIMEOUT:
+                    log(f"prefill gate timeout reason={reason} "
+                        f"cold={cold_large} est={int(est)}")
+                    break
+                if not waited:
+                    log(f"prefill gate wait reason={reason} est={int(est)}")
+                    waited = True
+                time.sleep(PREFILL_GATE_POLL)
+                phase = backend_slot_state()
+                if phase is None:
+                    break
+                reason = gate_decision(phase["prefilling"],
+                                       phase["generating"], cold_large)
+            if waited:
+                log("prefill gate admit waited="
+                    f"{time.monotonic() - started:.1f}s")
+    except Exception as e:  # a gate bug must never fail a request
+        log(f"prefill gate skipped: {e!r}")
+    finally:
+        try:
+            remember_prompt_prefix(decoded, profile)
+        except Exception:
+            pass
+
 
 
 def debug_prompt(decoded, body):
@@ -855,6 +1129,13 @@ class Handler(BaseHTTPRequestHandler):
                     state["busy"] = False
             state["active"] += 1
         try:
+            if (profile and body and self.command == "POST" and
+                    (self.path.startswith("/v1/chat/completions") or
+                     self.path.startswith("/v1/messages"))):
+                try:
+                    admit_prefill(json.loads(body), body, profile)
+                except Exception as e:  # never fail a turn on gate parsing
+                    log(f"prefill gate skipped: {e!r}")
             fwd = {k: v for k, v in self.headers.items()
                    if k.lower() not in HOP_HEADERS}
             # Body may have been rewritten (effort injection): length must match.

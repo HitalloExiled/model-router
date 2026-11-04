@@ -11,11 +11,13 @@ OpenAI model name picks the backend profile:
 Any other model name reuses whatever backend is running (the server accepts
 arbitrary model strings). Switching profiles stops the running container and
 boots the wanted one (~60s cold start); after IDLE_SEC seconds without
-requests the backend is stopped to free VRAM.
+requests the backend is stopped to free VRAM. The default is 6 h: the GPU has
+no other tenant, and a 15-minute unload threw away a warm 100K-token context
+on every coffee break (a ~63 s re-prefill on the next turn).
 
 Env:
   MODEL_ROUTER_PORT / MODEL_ROUTER_BACKEND_PORT / MODEL_ROUTER_IDLE_SEC
-    (default 18089 / 8080 / 900)
+    (default 18089 / 8080 / 21600)
   MODEL_ROUTER_LLAMA_SERVE_SH / MODEL_ROUTER_BONSAI_SERVE_SH (launchers)
   NINFER_LLAMA_IMAGE / NINFER_BONSAI_IMAGE (shared with the serve scripts)
   MODEL_ROUTER_DIGEST=1 / MODEL_ROUTER_DUMP=<dir> (prefix-cache forensics)
@@ -25,11 +27,14 @@ Env:
   MODEL_ROUTER_PREFILL_GATE_COLD=1 (also hold cold prompts behind a decoder)
   MODEL_ROUTER_PREFILL_GATE_DIAG=0 (silence gate diagnostics)
   MODEL_ROUTER_PREFILL_GATE_DIAG_VERBOSE=1 (log every admission, not just holds)
+  MODEL_ROUTER_SLOT_PERSIST=0 (do not save/restore warm slots across a boot)
+  MODEL_ROUTER_SLOT_DIR / _SAVE_MIN / _DISK_MIB / _IO_TIMEOUT
 """
 import hashlib
 import http.client
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -59,7 +64,7 @@ SERVE_BONSAI = os.environ.get(
 # recognize a running container, the scripts to pick the image to run.
 LLAMA_IMAGE = os.environ.get(
     "NINFER_LLAMA_IMAGE",
-    "ghcr.io/ggml-org/llama.cpp:server-cuda-b11854")
+    "ghcr.io/ggml-org/llama.cpp:server-cuda-b12110")
 GGUF_FILES = {
     "gguf-speed": "Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
     "gguf-range": "Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf",
@@ -93,8 +98,34 @@ LOG_DIR = os.path.join(os.path.expanduser("~"), ".local", "share", "model-router
 BOOT_LOG = os.path.join(LOG_DIR, "backend-boot.log")
 ROUTER_PORT = int(os.environ.get("MODEL_ROUTER_PORT", "18089"))
 BACKEND_PORT = int(os.environ.get("MODEL_ROUTER_BACKEND_PORT", "8080"))
-IDLE_SEC = int(os.environ.get("MODEL_ROUTER_IDLE_SEC", "900"))
+IDLE_SEC = int(os.environ.get("MODEL_ROUTER_IDLE_SEC", "21600"))
 BOOT_TIMEOUT = 420
+
+# Slot persistence. llama-server can dump a slot's KV cache to disk and load
+# it back into a fresh process; both serve scripts wire `--slot-save-path` and
+# a bind mount. Without it a tier switch or an idle unload throws away a warm
+# 100K-token context and pays a full re-prefill (measured 63.2 s for 115,491
+# tokens on bonsai-trio200, ~1,830 tok/s). Restore only works for the same
+# weights file - the server validates the state against the loaded model - so
+# the file name carries a hash of the weights basename: a Qwen dump is never
+# handed to Bonsai, and tiers that share a file (gguf-range/max/duo/quad,
+# every Bonsai) can hand a warm slot to each other.
+#
+# Since Oct 2026 the save file also carries the slot's context checkpoints
+# (upstream PR #26004). Hybrid models (Bonsai, Qwen3.8) need them: without the
+# appendix the server loads the KV and then throws it away ("forcing full
+# prompt re-processing due to lack of cache data"). A checkpoint is ~150 MiB,
+# so a long slot dump can be several GiB larger than the raw KV; the disk cap
+# below is sized for two full dumps.
+SLOT_PERSIST = os.environ.get("MODEL_ROUTER_SLOT_PERSIST", "1") != "0"
+SLOT_DIR = os.environ.get("MODEL_ROUTER_SLOT_DIR",
+                          os.path.join(ROUTER_DIR, "slot-cache"))
+# Below this many tokens a re-prefill is cheaper than touching the disk.
+SLOT_SAVE_MIN = int(os.environ.get("MODEL_ROUTER_SLOT_SAVE_MIN", "2048"))
+# Hard cap for the cache dir; oldest files are pruned first. A 100K Bonsai
+# slot is ~2.5 GiB of KV + checkpoints, a 96K Qwen q8_0 slot ~14 GiB.
+SLOT_DISK_MIB = int(os.environ.get("MODEL_ROUTER_SLOT_DISK_MIB", "32768"))
+SLOT_IO_TIMEOUT = float(os.environ.get("MODEL_ROUTER_SLOT_IO_TIMEOUT", "300"))
 
 PROFILES = {"gguf-speed", "gguf-range", "gguf-max", "gguf-duo", "gguf-duo128",
             "gguf-quad", "gguf-vision", "gguf-single192",
@@ -285,12 +316,156 @@ def backend_healthy():
         return False
 
 
+def slot_weights_key(profile):
+    """Stable per-weights-file key: the unit a slot dump can be restored into."""
+    name = GGUF_FILES.get(profile) or BONSAI_FILES.get(profile) or profile
+    return f"{family(profile) or 'x'}-{hashlib.sha1(name.encode()).hexdigest()[:10]}"
+
+
+def slot_file_name(profile, slot_id):
+    """Cache file for one slot. Safe for `fs_validate_filename` on the server
+    (no separators, no '..', < 255 chars) and bound to the weights file."""
+    return f"{slot_weights_key(profile)}-slot{int(slot_id)}.bin"
+
+
+def slot_restore_candidates(profile, names):
+    """(slot id, filename) pairs to restore into a freshly booted profile.
+
+    Only slots the resident profile actually has are returned: the server
+    wraps an out-of-range id_slot around the pool, so a two-slot dump restored
+    into a one-slot backend would silently land on slot 0 instead of being
+    rejected. Tiers that share a weights file share the dumps, which is what
+    makes a warm slot survive a range -> max switch.
+    """
+    if profile not in PROFILE_SLOTS:
+        return []
+    n_slots = PROFILE_SLOTS[profile]
+    wanted = {slot_file_name(profile, i): i for i in range(n_slots)}
+    return [(wanted[name], name) for name in dict.fromkeys(names)
+            if name in wanted]
+
+
+def slots_to_save(phases):
+    """Slot ids worth persisting before a stop: idle and carrying a prompt."""
+    if not phases:
+        return []
+    return sorted(int(s["id"]) for s in phases.get("slots", [])
+                  if not s.get("proc")
+                  and int(s.get("prompt_len") or 0) >= SLOT_SAVE_MIN)
+
+
+def slot_action(action, slot_id, filename):
+    """POST /slots/<id>?action=save|restore on the backend. (ok, payload)."""
+    body = json.dumps({"filename": filename}).encode()
+    conn = http.client.HTTPConnection("127.0.0.1", BACKEND_PORT,
+                                      timeout=SLOT_IO_TIMEOUT)
+    try:
+        conn.request("POST", f"/slots/{int(slot_id)}?action={action}",
+                     body=body, headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        return resp.status == 200, resp.read(65536) or b""
+    finally:
+        conn.close()
+
+
+def prune_slot_cache(keep=()):
+    """Cap the cache dir, oldest first. Unlinking needs write on the directory,
+    not on the file, so root-owned dumps written by the container are fine."""
+    try:
+        files = [os.path.join(SLOT_DIR, f) for f in os.listdir(SLOT_DIR)
+                 if f.endswith(".bin")]
+        sizes = {f: os.path.getsize(f) for f in files if os.path.isfile(f)}
+    except OSError:
+        return
+    total = sum(sizes.values())
+    cap = SLOT_DISK_MIB * 1024 * 1024
+    if total <= cap:
+        return
+    for path in sorted(sizes, key=os.path.getmtime):
+        if total <= cap:
+            break
+        if os.path.basename(path) in keep:
+            continue
+        try:
+            os.unlink(path)
+            total -= sizes[path]
+            log(f"slot cache pruned {os.path.basename(path)}")
+        except OSError:
+            pass
+
+
+def save_slot_cache():
+    """Persist warm slots before the backend is stopped (best effort).
+
+    Any failure only costs the re-prefill that already happens today, so this
+    never blocks or delays the stop beyond the per-file I/O timeout. A save is
+    skipped when the disk cannot take another dump: filling the volume would
+    break every later boot, which is far worse than one cold prefill.
+    """
+    if not SLOT_PERSIST:
+        return
+    try:
+        profile = state["profile"]
+        phases = backend_slot_state()
+        slots = slots_to_save(phases)
+        if not slots or profile not in PROFILES:
+            return
+        os.makedirs(SLOT_DIR, exist_ok=True)
+        free = shutil.disk_usage(SLOT_DIR).free
+        if free < 8 * 1024 ** 3:
+            log(f"slot save skipped: only {free // 1024 ** 3} GiB free")
+            return
+        kept = set()
+        for sid in slots:
+            name = slot_file_name(profile, sid)
+            t0 = time.monotonic()
+            ok, raw = slot_action("save", sid, name)
+            if not ok:
+                log(f"slot {sid} save failed: {raw[:160]!r}")
+                continue
+            kept.add(name)
+            path = os.path.join(SLOT_DIR, name)
+            mib = os.path.getsize(path) / 1048576 if os.path.exists(path) else 0
+            log(f"slot {sid} saved to {name} ({mib:.0f} MiB, "
+                f"{time.monotonic() - t0:.1f}s)")
+        prune_slot_cache(kept)
+    except Exception as e:  # the cache must never get in the way of a stop
+        log(f"slot save skipped: {e!r}")
+
+
+def restore_slot_cache(profile):
+    """Load persisted slots into the freshly booted backend (best effort)."""
+    if not SLOT_PERSIST or profile not in PROFILES:
+        return
+    try:
+        names = sorted(os.listdir(SLOT_DIR))
+    except OSError:
+        return
+    try:
+        for sid, name in slot_restore_candidates(profile, names):
+            t0 = time.monotonic()
+            ok, raw = slot_action("restore", sid, name)
+            if ok:
+                log(f"slot {sid} restored from {name} "
+                    f"({time.monotonic() - t0:.1f}s)")
+            else:
+                log(f"slot {sid} restore failed: {raw[:160]!r}")
+    except Exception as e:
+        log(f"slot restore skipped: {e!r}")
+
+
 def stop_backend():
     """Stop EVERY backend container: one model up means the other goes down.
 
     Stopping only the newest would leave a second resident backend holding
     VRAM after a manual launch, so the pre-flight gate must see a clean card.
+
+    Warm slots are saved first: a restart otherwise costs a full re-prefill
+    (~63 s at 115K tokens). The save is best effort and skipped entirely when
+    the backend is already gone.
     """
+    if backend_healthy():
+        save_slot_cache()
     ids = backend_containers()
     if ids:
         log("stopping backend", *ids)
@@ -329,6 +504,9 @@ def launch_command(profile, want_mmproj=False):
 
 def start_backend(profile, want_mmproj=False):
     env = dict(os.environ)
+    # Both serve scripts mount this dir and pass --slot-save-path /slot-cache
+    # so a warm slot can survive the restart (see restore_slot_cache).
+    env["NINFER_SLOT_CACHE_DIR"] = SLOT_DIR
     log(f"starting profile {profile} want_mmproj={want_mmproj}")
     # Serve output goes to a file, never DEVNULL: a dead launcher must leave
     # evidence (exit code + tail) instead of a silent 7-minute hang.
@@ -364,6 +542,7 @@ def start_backend(profile, want_mmproj=False):
                 state["profile"] = profile
                 state["profile_mmproj"] = want_mmproj
                 log(f"profile {profile} listening")
+                restore_slot_cache(profile)
                 return True
         except Exception:
             pass
@@ -1058,6 +1237,11 @@ class Handler(BaseHTTPRequestHandler):
         return self.rfile.read(n) if n > 0 else b""
 
     def do_GET(self):
+        # The slot API can save/restore files on the backend and is never part
+        # of the public surface: the router talks to it directly instead.
+        if self.path.startswith("/slots"):
+            return self._send(403, json.dumps(
+                {"error": "slot API is not proxied"}))
         if self.path == "/health":
             # Lock-free on purpose: a wedged boot must never take down the
             # status endpoint (single-key reads are GIL-atomic; worst case
@@ -1074,6 +1258,9 @@ class Handler(BaseHTTPRequestHandler):
         return self._relay(None)
 
     def do_POST(self):
+        if self.path.startswith("/slots"):
+            return self._send(403, json.dumps(
+                {"error": "slot API is not proxied"}))
         body = self._read_body()
         profile = None
         if self.path.startswith("/v1/chat/completions") or \

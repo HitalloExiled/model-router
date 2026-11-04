@@ -4,7 +4,7 @@
 #
 # Same env the systemd unit uses, so behaviour is identical; handy for a
 # terminal session, debugging, or a machine without systemd. Ctrl-C stops it
-# (and the idle backends keep their normal 900 s unload).
+# (and the idle backends keep their normal 6 h unload).
 #
 # Usage:
 #   scripts/run-router.sh [--port N] [--backend-port N] [--idle SEC]
@@ -26,7 +26,7 @@ stack() {
 
 port="${MODEL_ROUTER_PORT:-18089}"
 backend_port="${MODEL_ROUTER_BACKEND_PORT:-8080}"
-idle="${MODEL_ROUTER_IDLE_SEC:-900}"
+idle="${MODEL_ROUTER_IDLE_SEC:-21600}"
 
 while (( $# )); do
   case "$1" in

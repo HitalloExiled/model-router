@@ -552,6 +552,45 @@ def main():
         import shutil
         shutil.rmtree(dump_dir, ignore_errors=True)
 
+    # ---- slot persistence helpers: the dump belongs to a weights file, not
+    # to a tier or a slot count, and the restore must never wrap a dump into
+    # the wrong slot. ----
+    check("slot:same-weights-same-key",
+          nr.slot_weights_key("gguf-range") == nr.slot_weights_key("gguf-max"),
+          True)
+    check("slot:different-file-different-key",
+          nr.slot_weights_key("gguf-speed") != nr.slot_weights_key("gguf-range"),
+          True)
+    check("slot:families-differ",
+          nr.slot_weights_key("gguf-range") != nr.slot_weights_key("bonsai-trio200"),
+          True)
+    name0 = nr.slot_file_name("gguf-duo", 0)
+    name1 = nr.slot_file_name("gguf-duo", 1)
+    name3 = nr.slot_file_name("gguf-quad", 3)
+    check("slot:filename-shaped",
+          name0.endswith("-slot0.bin") and name0.startswith("gguf-"), True)
+    check("slot:filename-safe",
+          "/" not in name0 and ".." not in name0 and len(name0) < 255, True)
+    names = [name0, name1, name0, name3, "unrelated.bin"]
+    check("slot:restore-duo",
+          nr.slot_restore_candidates("gguf-duo", names),
+          [(0, name0), (1, name1)])
+    check("slot:restore-range",
+          nr.slot_restore_candidates("gguf-range", names),
+          [(0, name0)])
+    # A 4-slot tier accepts the duo dump in slots 0/1 and its own slot 3.
+    check("slot:restore-quad",
+          nr.slot_restore_candidates("gguf-quad", names),
+          [(0, name0), (1, name1), (3, name3)])
+    check("slot:restore-empty", nr.slot_restore_candidates("gguf-duo", []), [])
+    phases = {"slots": [
+        {"id": 2, "proc": False, "prompt_len": 5000},
+        {"id": 0, "proc": True, "prompt_len": 9000},
+        {"id": 1, "proc": False, "prompt_len": 100},
+    ]}
+    check("slot:to-save", nr.slots_to_save(phases), [2])
+    check("slot:to-save-none", nr.slots_to_save(None), [])
+
     # ---- table invariants: a profile missing from one table silently changes
     # routing (e.g. no window -> never reused, no VISION_CAPABLE -> media
     # reboots a whole tier). Keep the tables in lockstep. ----

@@ -39,15 +39,23 @@ Guidance for coding agents working in this repository.
   stack image (the stock llama.cpp image and `bonsai-llama-4090`) and
   `stop_backend()` stops all of them before a new boot.
 - The stock llama.cpp image is pinned in both `model-router.py` (`LLAMA_IMAGE`)
-  and `gguf-stack/serve-llama.sh`. Bump both together.
+  and `gguf-stack/serve-llama.sh`. Bump both together; the pin is b12110
+  (v0.9.0, 2026-11-04).
 - The Bonsai image is built from the PrismML fork, which is the `llama.cpp/`
   submodule of `bonsai-stack`, checked out at the release tag
-  `prism-b10831-9d9efea`. Its gitlink is the pin: never duplicate the commit
+  `prism-b12128-d7b2896`. Its gitlink is the pin: never duplicate the commit
   in a file. Bump with `git -C llama.cpp checkout prism-bXXXXX-<sha>` and
   commit the new gitlink; pass the tag to the build only for provenance
   (`--build-arg PRISM_TAG="$(git -C llama.cpp describe --tags --exact-match)"`).
   The image carries the `org.prismml.ternary` label; `serve-bonsai.sh` refuses
   any image without it (stock llama.cpp mis-loads the packs and emits garbage).
+- Slot persistence: the router saves idle slots (>= MODEL_ROUTER_SLOT_SAVE_MIN)
+  before `stop_backend()` and restores them after a boot, keyed by a hash of
+  the weights file. Hybrid models (both families) need the slot file's
+  checkpoint appendix (upstream PR #26004): Bonsai requires prism-b12128+,
+  Qwen b11854+. Without it the restore returns 200 and the next request still
+  re-prefills everything ("forcing full prompt re-processing"). The `/slots`
+  API is never proxied; it is a file-writing endpoint.
 - `PROFILE_SLOTS` is load-bearing for concurrency: reuse requires the resident
   backend to have at least the requested slots, or requests that look
   parallel are queued inside llama-server.

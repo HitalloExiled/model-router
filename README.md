@@ -125,3 +125,34 @@ never held. Diagnostics are quiet by default (only holds are logged);
 `MODEL_ROUTER_PREFILL_GATE_TIMEOUT` (default 10 s) bounds the wait so a stuck
 prefill can never turn the router into a queue.
 
+## Slot persistence
+
+Idle unload is 6 h by default (`MODEL_ROUTER_IDLE_SEC=21600`): the GPU has no
+other tenant, and the old 15-minute timeout threw away a warm 100K-token
+context on every pause, paying the full re-prefill on the next turn. A tier
+switch still restarts the process; slot persistence makes that restart cheap.
+
+Both launchers pass `--slot-save-path /slot-cache` and bind-mount
+`slot-cache/`. Before `stop_backend()` the router saves every idle slot with
+at least `MODEL_ROUTER_SLOT_SAVE_MIN` (default 2048) tokens; after the next
+boot it restores the dump that belongs to the same weights file. Measured
+cost of the thing it removes: 63.2 s for 115,491 tokens on `bonsai-trio200`
+(~1,830 tok/s).
+
+- The file name is `<family>-<sha1(weights-basename)[:10]>-slot<id>.bin`, so a
+  Qwen dump is never handed to Bonsai, while tiers that share a weights file
+  (`gguf-range/max/duo/quad`, every Bonsai tier) can hand a warm slot to each
+  other.
+- Hybrid models need the checkpoint appendix (upstream PR #26004). Bonsai
+  requires a `prism-b12128+` image; Qwen a `b11854+` one. Without it restore
+  answers 200 and the next request still re-prefills (the server logs
+  "forcing full prompt re-processing due to lack of cache data").
+- Budget: a 100K Bonsai slot is ~2.5 GiB of KV plus checkpoints, a 96K Qwen
+  q8_0 slot ~14 GiB. `MODEL_ROUTER_SLOT_DISK_MIB` (default 32768) caps the
+  directory, oldest first; a save is skipped when less than 8 GiB is free.
+- The slot API is never proxied (403) and the backend is published on
+  loopback only: it writes files.
+- `MODEL_ROUTER_SLOT_PERSIST=0` disables the whole mechanism. Validate with
+  `scripts/slot-persist-probe.py` (prime/save -> restart -> restore ->
+  measure): a working restore leaves `cache_n` near the prompt length, not 0.
+

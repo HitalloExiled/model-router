@@ -1,3 +1,4 @@
 models/
 *.log
 __pycache__/
+slot-cache/

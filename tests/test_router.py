@@ -85,21 +85,21 @@ def main():
 
     for label, args, want in [
         ("low-is-budgeted", ("qwen3.8-gguf-max-low",),
-         ("gguf-max", "medium", 2048)),
+         ("gguf-max", "low", 3072)),
         ("medium-budget", ("qwen3.8-gguf-max-medium",),
-         ("gguf-max", "medium", 3072)),
+         ("gguf-max", "medium", 2048)),
         ("high-maps-xhigh", ("qwen3.8-gguf-max-high",),
          ("gguf-max", "xhigh", 8192)),
         ("minimal-alias-low", ("qwen3.8-gguf-max-minimal",),
-         ("gguf-max", "medium", 2048)),
+         ("gguf-max", "low", 3072)),
         ("xhigh-unbounded", ("qwen3.8-gguf-max-xhigh",),
          ("gguf-max", "xhigh", "<ABSENT>")),
         ("explicit-wins", ("qwen3.8-gguf-max-low", "hi", "medium"),
-         ("gguf-max", "medium", 3072)),
+         ("gguf-max", "medium", 2048)),
         ("explicit-budget-wins",
          ("qwen3.8-gguf-max-low", "hi", None,
           {"reasoning_budget_tokens": 4096}),
-         ("gguf-max", "medium", 4096)),
+         ("gguf-max", "low", 4096)),
         ("client-thinking-off",
          ("qwen3.8-gguf-max-low", "hi", None,
           {"chat_template_kwargs": {"enable_thinking": False}}),
@@ -107,22 +107,20 @@ def main():
         ("unsupported-dropped", ("qwen3.8-gguf-max", "hi", "max"),
          ("gguf-max", "<ABSENT>", "<ABSENT>")),
         ("unknown-tier-budget", ("mystery-model-low",),
-         ("gguf-range", "medium", 2048)),
-        # The budget follows the RESIDENT tier, not the requested name: low
-        # on Bonsai is 4096, not the Qwen 2048.
+         ("gguf-range", "low", 3072)),
+        # The policy follows the RESIDENT family: Bonsai low uses the medium
+        # template (the low sentence made it loop) and its own budget.
         ("reuse-budget-follows-tier",
          ("qwen3.8-gguf-max-low", "hi", None, None, "bonsai-max"),
-         ("bonsai-max", "medium", 4096)),
+         ("bonsai-max", "medium", 3072)),
         # Media stays on the requested tier now that every backend carries the
         # encoder: no more 35B vision tier.
         ("media-keeps-tier", ("qwen3.8-gguf-range", [img]),
          ("gguf-range", "<ABSENT>", "<ABSENT>")),
         ("plain-untouched", ("qwen3.8-gguf-max",),
          ("gguf-max", "<ABSENT>", "<ABSENT>")),
-        # Bonsai carries a higher safety net: it reasons ~1.7x longer than
-        # Qwen on the same prompt (measured 730-4242 tokens vs 675-2424).
         ("bonsai-low-budget", ("bonsai-2-27b-quad128-low",),
-         ("bonsai-quad128", "medium", 4096)),
+         ("bonsai-quad128", "medium", 3072)),
         ("bonsai-medium-budget", ("bonsai-2-27b-trio256-medium",),
          ("bonsai-trio256", "medium", 6144)),
         ("bonsai-high-maps-xhigh", ("bonsai-2-27b-octo64-high",),
@@ -145,7 +143,7 @@ def main():
 
     for label, args, want in [
         ("gguf-low", ("qwen3.8-gguf-max-low",),
-         ("gguf-max", "medium", True, 2048, True)),
+         ("gguf-max", "low", True, 3072, True)),
         ("gguf-high", ("qwen3.8-gguf-max-high",),
          ("gguf-max", "xhigh", True, 8192, True)),
         ("gguf-none", ("qwen3.8-gguf-max-none",),
@@ -153,16 +151,16 @@ def main():
         ("explicit-budget",
          ("qwen3.8-gguf-max-low", None,
           {"thinking": {"type": "enabled", "budget_tokens": 4096}}),
-         ("gguf-max", "medium", True, 4096, False)),
+         ("gguf-max", "low", True, 4096, False)),
         ("thinking-disabled",
          ("qwen3.8-gguf-max-low", None,
           {"thinking": {"type": "disabled"}}),
          ("gguf-max", "<ABSENT>", "<ABSENT>", "<ABSENT>", False)),
         ("bonsai-low-messages", ("bonsai-2-27b-quad128-low",),
-         ("bonsai-quad128", "medium", True, 4096, True)),
+         ("bonsai-quad128", "medium", True, 3072, True)),
         ("reuse-budget-follows-tier",
          ("qwen3.8-gguf-max-low", None, None, "bonsai-max"),
-         ("bonsai-max", "medium", True, 4096, True)),
+         ("bonsai-max", "medium", True, 3072, True)),
     ]:
         check(f"messages:{label}", messages(*args), want)
 
@@ -394,9 +392,9 @@ def main():
     # ---- apply_effort_policy: per-family safety nets, and a transition
     # ---- message whenever a cap is actually in force ----
     P = nr.apply_effort_policy
-    for fam, want in (("gguf", {"low": 2048, "medium": 3072, "high": 8192,
+    for fam, want in (("gguf", {"low": 3072, "medium": 2048, "high": 8192,
                                 "xhigh": None}),
-                      ("bonsai", {"low": 4096, "medium": 6144, "high": 8192,
+                      ("bonsai", {"low": 3072, "medium": 6144, "high": 8192,
                                   "xhigh": None})):
         for tier, budget in want.items():
             d, meta, notes = {"model": "x"}, {}, []
@@ -413,7 +411,80 @@ def main():
     d, meta, notes = {"model": "x"}, {}, []
     P(d, "/v1/chat/completions", "low", None, meta, notes)
     check("effortpol:unknown-family-cap",
-          d.get("reasoning_budget_tokens"), 2048)
+          d.get("reasoning_budget_tokens"), 3072)
+
+    # ---- style injection + dynamic budget ----
+    def body_for(model, extra=None, path="/v1/chat/completions"):
+        d = {"model": model,
+             "messages": [{"role": "system", "content": "CLIENT SYSTEM"},
+                          {"role": "user", "content": "hi"}]}
+        if extra:
+            d.update(extra)
+        _p, raw, _n, _m, _meta = nr.normalize_chat_body(
+            path, json.dumps(d).encode())
+        return json.loads(raw)
+
+    def system_of(out):
+        for m in out.get("messages") or []:
+            if m.get("role") == "system":
+                return m.get("content") or ""
+        return ""
+
+    lo = body_for("qwen3.8-gguf-max-low")
+    check("style:gguf-low-fewshot", nr.FEWSHOT_STYLE in system_of(lo), True)
+    check("style:gguf-low-client-kept", "CLIENT SYSTEM" in system_of(lo), True)
+    check("style:gguf-low-template", lo.get("reasoning_effort"), "low")
+    md = body_for("qwen3.8-gguf-max-medium")
+    check("style:gguf-medium-brief", nr.BRIEF_STYLE in system_of(md), True)
+    hi = body_for("qwen3.8-gguf-max-high")
+    check("style:gguf-high-none",
+          nr.FEWSHOT_STYLE not in system_of(hi)
+          and nr.BRIEF_STYLE not in system_of(hi), True)
+    bo = body_for("bonsai-2-27b-duo256-low")
+    check("style:bonsai-low-fewshot", nr.FEWSHOT_STYLE in system_of(bo), True)
+    check("style:bonsai-low-template", bo.get("reasoning_effort"), "medium")
+    no = body_for("qwen3.8-gguf-max-none")
+    check("style:none-none", nr.FEWSHOT_STYLE not in system_of(no), True)
+    off = body_for("qwen3.8-gguf-max-low",
+                   {"chat_template_kwargs": {"enable_thinking": False}})
+    check("style:client-off-none",
+          nr.FEWSHOT_STYLE not in system_of(off), True)
+
+    def budget_for(model, extra):
+        return body_for(model, extra).get("reasoning_budget_tokens")
+
+    check("dyn:low-4k", budget_for("qwen3.8-gguf-max-low",
+                                   {"max_tokens": 4096}), 2560)
+    check("dyn:medium-4k", budget_for("qwen3.8-gguf-max-medium",
+                                      {"max_tokens": 4096}), 2048)
+    check("dyn:xhigh-4k", budget_for("qwen3.8-gguf-max-xhigh",
+                                     {"max_tokens": 4096}), 2560)
+    check("dyn:xhigh-8k", budget_for("qwen3.8-gguf-max-xhigh",
+                                     {"max_tokens": 8192}), 6656)
+    check("dyn:xhigh-none", budget_for("qwen3.8-gguf-max-xhigh", {}), None)
+    check("dyn:low-8k", budget_for("qwen3.8-gguf-max-low",
+                                   {"max_tokens": 8192}), 3072)
+    check("dyn:bonsai-low-4k", budget_for("bonsai-2-27b-duo256-low",
+                                          {"max_tokens": 4096}), 2560)
+    check("dyn:max-completion", budget_for("qwen3.8-gguf-max-xhigh",
+                                           {"max_completion_tokens": 4096}), 2560)
+    check("dyn:low-1k", budget_for("qwen3.8-gguf-max-low",
+                                   {"max_tokens": 1024}), 512)
+    check("dyn:low-tiny", budget_for("qwen3.8-gguf-max-low",
+                                     {"max_tokens": 512}), 256)
+
+    mlo_body = {"model": "qwen3.8-gguf-max-low", "max_tokens": 4096,
+                "system": "CLIENT SYSTEM",
+                "messages": [{"role": "user", "content": "hi"}]}
+    _p, raw, _n, _m, _meta = nr.normalize_chat_body(
+        "/v1/messages", json.dumps(mlo_body).encode())
+    mlo = json.loads(raw)
+    check("style:messages-low-fewshot",
+          nr.FEWSHOT_STYLE in (mlo.get("system") or ""), True)
+    check("style:messages-client-kept",
+          "CLIENT SYSTEM" in (mlo.get("system") or ""), True)
+    check("dyn:messages-low-4k",
+          (mlo.get("thinking") or {}).get("budget_tokens"), 2560)
 
     d, meta, notes = {"reasoning_budget_tokens": 999,
                       "reasoning_budget_message": "mine"}, {}, []

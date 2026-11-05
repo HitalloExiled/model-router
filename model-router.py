@@ -553,38 +553,59 @@ def start_backend(profile, want_mmproj=False):
 
 EFFORT_SUFFIXES = ("none", "low", "medium", "high", "xhigh", "minimal")
 
-# Backend family -> {tier: (template reasoning_effort, thinking budget)}.
+# Backend family -> {tier: (template reasoning_effort, configured budget)}.
 #
-# The Qwen3.8 template only accepts xhigh|medium|low; "medium" adds no
-# instruction at all, so low/medium differ only by budget. high maps to xhigh
-# (the template rejects "high"); xhigh stays unbounded. minimal is an OpenAI
-# alias for low. Budgets are per thinking block and only injected for
-# llama.cpp backends (GGUF_FILES + BONSAI_FILES).
-#
-# The budgets are SAFETY NETS, not rate limiters: sized above the reasoning
-# the model actually uses, so they only cut pathological turns. Measured with
-# the cap removed (tokens, realistic prompts): Qwen 675-2424, Bonsai
-# 730-4242, trivial prompts ~30-55. At 512 -- well below both -- Qwen answered
-# 54% of a verifiable problem correctly vs 100% uncapped (15/28 vs 26/26),
-# Bonsai 72% vs 100% (13/18 vs 16/16). Three candidate transition messages
-# were indistinguishable from each other, so the cut itself, not its wording,
-# is what costs accuracy. Bonsai sits ~1.7x above Qwen on the same prompt,
-# hence the two tables.
+# The template only accepts xhigh|medium|low. Measured 2026-11-04 on a
+# 9-prompt battery (Qwen b12110 / Bonsai prism-b12128):
+#   - Qwen low: the template's low sentence + a one-example few-shot cut the
+#     realistic task from 1,360 to 991 reasoning tokens (42.6 s -> 30.5 s) at
+#     100% accuracy; the median fell 134 -> 83.
+#   - Qwen medium: the medium template adds no instruction; a "think briefly"
+#     system prompt cut the realistic 2,243 -> 1,225 tokens at 100%.
+#   - Bonsai low: the template's low sentence made it loop on the open-ended
+#     prompt. The medium template + the same few-shot answers in 2,052 tokens
+#     (24.1 s); the no-style medium answers in 1,685.
+#   - high/xhigh: the model can run past the client's max_tokens and return no
+#     answer at all. The dynamic cap below (max_tokens - reserve) forces the
+#     transition and leaves room for the answer (Qwen xhigh: 4096+0 ->
+#     2,574+378).
+# The configured budgets are safety ceilings above the observed natural
+# ranges; the style and the dynamic cap are the levers.
 EFFORT_POLICY = {
     "gguf": {
         "none": ("none", None),
-        "low": ("medium", 2048),
-        "medium": ("medium", 3072),
+        "low": ("low", 3072),
+        "medium": ("medium", 2048),
         "high": ("xhigh", 8192),
         "xhigh": ("xhigh", None),
     },
     "bonsai": {
         "none": ("none", None),
-        "low": ("medium", 4096),
+        "low": ("medium", 3072),
         "medium": ("medium", 6144),
         "high": ("xhigh", 8192),
         "xhigh": ("xhigh", None),
     },
+}
+
+# One concise example beats an abstract instruction: the template's own low
+# sentence was not enough for either family. The Bonsai keeps the medium
+# template for `low` because the low sentence made it loop.
+FEWSHOT_STYLE = (
+    "Example of the desired style:\n"
+    "Question: What is 17*24?\n"
+    "Reasoning: 17*24 = 17*20 + 17*4 = 408.\n"
+    "Answer: 408\n\n"
+    "Solve the next task in the same concise style: at most one sentence of "
+    "reasoning, then the answer."
+)
+BRIEF_STYLE = (
+    "Think briefly: at most one short paragraph. Then answer. Do not "
+    "enumerate alternatives."
+)
+EFFORT_STYLE = {
+    "gguf": {"low": FEWSHOT_STYLE, "medium": BRIEF_STYLE},
+    "bonsai": {"low": FEWSHOT_STYLE},
 }
 
 
@@ -599,6 +620,56 @@ BUDGET_KEYS = ("reasoning_budget_tokens", "thinking_budget_tokens")
 # out. Without it llama.cpp forces a bare </think> mid-sentence; Bonsai then
 # frequently emits EOS and the turn ends with no answer at all.
 BUDGET_MESSAGE = "\n\nOkay, I have thought enough. Time to write the final answer."
+
+# Leave the model room to answer after the forced transition. 1,536 covers
+# the measured answers (6-1,100 tokens) while still letting a 4k request think
+# for 2,560 tokens. A tiny max_tokens halves instead of starving the answer.
+ANSWER_RESERVE = 1536
+
+
+def effective_budget(configured, decoded):
+    """Cap thinking so the answer still fits the client's max_tokens.
+
+    high/xhigh are configured unbounded; with a 4k max_tokens the model used
+    all 4k thinking and returned an empty answer. The cap is dynamic per
+    request, not a fixed number.
+    """
+    limit = decoded.get("max_tokens")
+    if not isinstance(limit, int) or limit <= 0:
+        limit = decoded.get("max_completion_tokens")
+    if not isinstance(limit, int) or limit <= 0:
+        return configured
+    room = limit - ANSWER_RESERVE
+    if room < 256:
+        room = max(128, limit // 2)
+    return room if configured is None else min(configured, room)
+
+
+def inject_style(decoded, path, style):
+    """Prepend the style example to the client's system prompt, not replace it."""
+    if path.startswith("/v1/messages"):
+        system = decoded.get("system")
+        if isinstance(system, list):
+            decoded["system"] = [{"type": "text", "text": style}] + system
+        elif isinstance(system, str) and system:
+            decoded["system"] = style + "\n\n" + system
+        else:
+            decoded["system"] = style
+        return
+    messages = decoded.get("messages")
+    if not isinstance(messages, list):
+        return
+    for msg in messages:
+        if isinstance(msg, dict) and msg.get("role") == "system":
+            content = msg.get("content")
+            if isinstance(content, list):
+                msg["content"] = [{"type": "text", "text": style}] + content
+            elif isinstance(content, str) and content:
+                msg["content"] = style + "\n\n" + content
+            else:
+                msg["content"] = style
+            return
+    messages.insert(0, {"role": "system", "content": style})
 
 
 def parse_model(model):
@@ -991,13 +1062,13 @@ def has_explicit_budget(decoded, path):
 
 
 def apply_effort_policy(decoded, path, effort, family, meta, notes):
-    """Rewrite one request to the tier's template hint + hard budget.
+    """Rewrite one request to the tier's template, style and dynamic budget.
 
     Explicit client thinking wins: a disabled thinking block is never
     re-enabled, and an explicit budget is never overwritten. `family` selects
-    the budget table; an unknown family falls back to the gguf table.
+    the policy; an unknown family falls back to the gguf table.
     """
-    template, budget = effort_policy(family)[effort]
+    template, configured = effort_policy(family)[effort]
     meta["template"] = template
     mode = client_thinking_mode(decoded, path)
     if mode == "disabled":
@@ -1019,6 +1090,12 @@ def apply_effort_policy(decoded, path, effort, family, meta, notes):
             decoded["reasoning_effort"] = "none"
         notes.append("effort none")
         return True
+    style = EFFORT_STYLE.get(family, {}).get(effort)
+    if style:
+        inject_style(decoded, path, style)
+        meta["style"] = True
+        notes.append("style injected")
+    budget = effective_budget(configured, decoded)
     if path.startswith("/v1/messages"):
         ctk = decoded.get("chat_template_kwargs")
         if not isinstance(ctk, dict):

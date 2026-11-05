@@ -18,16 +18,31 @@ Guidance for coding agents working in this repository.
 ## Reasoning effort invariants
 
 - Client tiers map to `EFFORT_POLICY` in `model-router.py`:
-  `none`, `low=512`, `medium=2048`, `high=8192`, `xhigh=unbounded`.
-- `low`/`medium` share template `medium`; `high`/`xhigh` share template
-  `xhigh`. This is deliberate: changing only the budget keeps the prompt
-  prefix identical and preserves llama.cpp's prefix cache.
+  `none`, `low=3072`, `medium=2048 (Qwen) / 6144 (Bonsai)`, `high=8192`,
+  `xhigh=unbounded`.
+- The budget is a safety net; the lever is the style in `EFFORT_STYLE`:
+  Qwen `low` gets a one-shot concise example (and the template's `low`),
+  Qwen `medium` a “think briefly” system prompt, Bonsai `low` the same example
+  on the **medium** template. The Bonsai template `low` sentence makes it loop
+  on open-ended prompts; keep Bonsai low on `medium`.
+- Styles are prepended to the client's system prompt (or inserted as a system
+  message), never replacing it; `inject_style` handles OpenAI string/list and
+  Anthropic `system` string/list.
+- The effective budget is dynamic:
+  `min(configured, max_tokens - ANSWER_RESERVE)` with reserve 1,536; below 256
+  tokens of room it halves instead. `high`/`xhigh` are configured unbounded,
+  so without the dynamic cap a 4k client request can spend all 4k thinking and
+  return no answer.
+- `low`/`medium` do **not** share a template any more (Qwen low vs medium).
+  Changing effort mid-session changes the prompt prefix and re-prefills; the
+  slot persistence only covers a backend restart.
 - `high` maps to `xhigh` because the Qwen3.8 template rejects `high`;
   `minimal` aliases `low`.
 - Budgets are llama.cpp-only (`reasoning_budget_tokens`); gate on `LLAMA_ALL`
   (GGUF_FILES | BONSAI_FILES). An unknown family falls back to the gguf table.
 - `/v1/messages` uses `chat_template_kwargs` + `thinking.budget_tokens`;
-  an explicit client `thinking` block wins.
+  an explicit client `thinking` block wins, and an explicit client budget is
+  never overwritten.
 - The client catalog (`~/.config/opencode/opencode.jsonc`, v2 `variants`
   array) must list all six tiers per model. A tier missing there is
   unreachable from the UI even though the router supports it. Its default

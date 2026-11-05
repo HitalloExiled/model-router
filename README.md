@@ -34,25 +34,49 @@ debugging aid, not a replacement for the unit.
 
 ## Reasoning effort
 
-Client tier -> Qwen3.8 template hint + hard thinking budget:
+Client tier -> template, style and thinking budget. The style is what makes
+the model reason less; the budget is only the safety net:
 
-| tier | template | budget |
-|---|---|---|
-| `none` | thinking off | — |
-| `low` | `medium` | 512 |
-| `medium` | `medium` | 2048 |
-| `high` | `xhigh` | 8192 |
-| `xhigh` | `xhigh` | unlimited |
+| tier | Qwen template | Bonsai template | style | configured budget |
+|---|---|---|---|---|
+| `none` | thinking off | thinking off | — | — |
+| `low` | `low` | `medium` | one-shot concise example | 3072 |
+| `medium` | `medium` | `medium` | “think briefly” (Qwen) | 2048 / 6144 |
+| `high` | `xhigh` | `xhigh` | — | 8192 |
+| `xhigh` | `xhigh` | `xhigh` | — | unlimited |
 
 `high` maps to `xhigh` because the template rejects `high`; `minimal` is an
-alias for `low`. Budgets use llama.cpp's `reasoning_budget_tokens` and are
-injected on every backend here (GGUF + Bonsai). The llama.cpp image is pinned
-to `server-cuda-b11854`; override with `NINFER_LLAMA_IMAGE`.
+alias for `low`. Budgets use llama.cpp's `reasoning_budget_tokens`, and the
+style is prepended to the client's system prompt, never replacing it.
+
+Why the styles are family-specific (measured 2026-11-05 on a 9-prompt battery,
+Qwen b12110 / Bonsai prism-b12128):
+
+- Qwen `low` with the template's low sentence + a one-example few-shot: the
+  realistic task went 1,360 -> 991 reasoning tokens (42.6 s -> 30.5 s) at
+  100% accuracy; median 134 -> 83.
+- Qwen `medium` with a “think briefly” system prompt: 2,243 -> 1,225 tokens at
+  100%.
+- Bonsai `low` with the template's low sentence **looped** on the open-ended
+  task (4,096 + no answer). The medium template + the same few-shot answers in
+  2,052 tokens (24.1 s); the no-style medium answers in 1,685.
+- `high`/`xhigh` used to run past the client's `max_tokens` and return no
+  answer. The budget is now dynamic: `min(configured, max_tokens - 1536)`, so
+  a 4k request thinks for 2,560 and keeps 1,536 for the answer (Qwen xhigh:
+  4,096 + 0 -> 2,574 + 378). A tiny `max_tokens` halves instead of starving
+  the answer.
+
+The style/budget changes the prompt prefix, so changing effort mid-session
+re-prefills the context; the slot persistence covers backend restarts, not a
+template switch.
 
 The client catalog (`~/.config/opencode/opencode.jsonc`) must list all six
 tiers per model (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`); a tier
 missing there is unreachable from the UI even though the router supports it.
 The catalog default (no variant selected) is `low`.
+
+The llama.cpp image is pinned to `server-cuda-b12110`; override with
+`NINFER_LLAMA_IMAGE`.
 
 The backend stacks are git submodules of this repo:
 

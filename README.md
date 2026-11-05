@@ -149,7 +149,7 @@ is the model generating the file content as the tool arguments (measured: an
 budget alone is ~49 s at 31, ~24 s at 65. The lever is the faster tier
 plus the reasoning budget; `edit`/patch also avoids regenerating the whole
 file, but that is secondary to the tier speed. The MTP tier is for file-heavy
-sessions; `max` is for >192K contexts.
+sessions; `max` is for >200K contexts.
 
 ## Admission gate (prefill vs decode)
 

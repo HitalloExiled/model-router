@@ -291,7 +291,7 @@ def main():
     for label, args, want in [
         ("llama-alias-single192",
          "-m /models/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf --alias "
-         "qwen3.8-gguf-single192 -c 196608 --parallel 1 --mmproj /m/mmproj.gguf",
+         "qwen3.8-gguf-single192 -c 204800 --parallel 1 --mmproj /m/mmproj.gguf",
          "gguf-single192"),
         ("llama-alias-max", "--alias qwen3.8-gguf-max -c 262144", "gguf-max"),
         ("llama-no-alias-parallel4", "-m x.gguf --parallel 4", "gguf-quad"),

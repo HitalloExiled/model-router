@@ -244,6 +244,28 @@ def main():
          False, "bonsai-quad128"),
         ("family-switch-bonsai-to-gguf", "gguf-range", "bonsai-max", 1000,
          False, "gguf-range"),
+        # Speed-aware reuse: the requested MTP tier (97 tok/s) beats the
+        # resident base (33) by 2.9x, so switch; the reverse keeps the faster
+        # resident. Same-group switches have a lower bar (the slot restores the
+        # KV) than base <-> MTP (which re-prefills the context).
+        ("speed-switch-mtp", "gguf-single192", "gguf-max", 1000, False,
+         "gguf-single192"),
+        ("speed-keep-faster-resident", "gguf-max", "gguf-single192", 1000,
+         False, "gguf-single192"),
+        ("speed-switch-mtp-from-duo", "gguf-single192", "gguf-duo128", 1000,
+         False, "gguf-single192"),
+        ("speed-switch-speed-from-range", "gguf-speed", "gguf-range", 1000,
+         False, "gguf-speed"),
+        ("speed-keep-equal-base", "gguf-max", "gguf-range", 1000, False,
+         "gguf-range"),
+        ("speed-bonsai-max-keeps-duo", "bonsai-max", "bonsai-duo256", 1000,
+         False, "bonsai-duo256"),
+        ("speed-bonsai-max-keeps-trio", "bonsai-max", "bonsai-trio200", 1000,
+         False, "bonsai-trio200"),
+        ("speed-cross-family-switches", "gguf-single192", "bonsai-duo256",
+         1000, False, "gguf-single192"),
+        ("speed-vision-same", "gguf-vision", "gguf-range", 1000, False,
+         "gguf-range"),
     ]:
         check(f"reuse:{label}", E(w, c, e, m), want)
 
@@ -672,6 +694,8 @@ def main():
     check("inv:profiles-vision", nr.PROFILES - nr.VISION_CAPABLE, set())
     check("inv:gguf-files", set(nr.GGUF_FILES) - nr.PROFILES, set())
     check("inv:bonsai-files", set(nr.BONSAI_FILES) - nr.PROFILES, set())
+    check("inv:profile-speed", set(nr.PROFILE_SPEED), nr.PROFILES)
+    check("inv:profile-group", set(nr.PROFILE_GROUP), nr.PROFILES)
 
     if FAILURES:
         print(f"\n{len(FAILURES)} FAILURES")

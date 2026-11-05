@@ -91,8 +91,21 @@ Guidance for coding agents working in this repository.
   `bonsai`, and `effective_profile()` never reuses a backend from another
   family. Same slot count is not permission to answer a Qwen request with
   Bonsai weights — that silently changes the model under the client.
-- The router prefers the running backend over the requested tier to avoid
-  a full re-prefill. A tier switch invalidates the prefix cache.
+- The router prefers the running backend over the requested tier to avoid a
+  full re-prefill. A tier switch invalidates the prefix cache.
+- Tier selection is **speed-aware**: `PROFILE_SPEED` (all 18 profiles) and
+  `PROFILE_GROUP` (the slot weights key) drive `effective_profile`. Keep the
+  resident unless the requested tier fits and is 1.25x faster in the same
+  weights group or 1.5x across (Qwen base <-> MTP; the latter also re-prefills).
+  This is what stops a `single192` request from running at the resident
+  `max`'s ~33 tok/s instead of the MTP's ~97. The rule covers Qwen/Bonsai,
+  base/MTP, 1..8 slots, text/vision.
+- `write`/`edit` latency is **model output, not disk**: the tool executes in
+  3–17 ms; the file content (write) or old+new strings (edit) are generated
+  token by token at the tier's decode speed. Measured: an 11 KB write ~85 s at
+  31 tok/s vs ~29 s at 97; the `low` 1,536 reasoning budget alone is ~49 s at
+  31 vs ~16 s at 97. Prefer the MTP tier for file-heavy sessions and
+  `edit`/patch over `write` for changes.
 - The admission gate (`admit_prefill`) serializes arrivals behind an in-flight
   prefill so two prefills never interleave. It reads `/slots`, where
   `n_prompt_tokens` is **not** the prompt length: it is the KV cache for the

@@ -154,6 +154,27 @@ PROFILE_SLOTS = {"gguf-speed": 1, "gguf-range": 1, "gguf-max": 1,
                  "bonsai-duo128": 2, "bonsai-quad128": 4,
                  "bonsai-penta128": 5, "bonsai-hexa128": 6,
                  "bonsai-octo64": 8, "bonsai-vision": 1}
+
+# Measured decode throughput in tok/s (2026-11-05). The MTP draft tiers are
+# ~3x base Qwen; the Bonsai ternary is ~2x Qwen and its single-slot max is the
+# fastest Bonsai. Values for tiers not benchmarked directly are estimates; the
+# router only uses the relative order. Decode speed is what dominates `write`
+# and `edit` calls: the file text (and the edit's old/new strings) is model
+# output, generated token by token.
+PROFILE_SPEED = {
+    "gguf-speed": 97, "gguf-single192": 97,
+    "gguf-range": 33, "gguf-max": 33, "gguf-duo": 33, "gguf-duo128": 33,
+    "gguf-quad": 33, "gguf-vision": 33,
+    "bonsai-max": 81, "bonsai-duo256": 66, "bonsai-trio256": 66,
+    "bonsai-trio200": 66, "bonsai-duo128": 66, "bonsai-quad128": 66,
+    "bonsai-penta128": 66, "bonsai-hexa128": 66, "bonsai-octo64": 66,
+    "bonsai-vision": 66,
+}
+# A tier switch costs a boot and, across weights groups, a full re-prefill;
+# inside a group the slot dump restores the KV. Switch to the requested tier
+# only when it is this much faster: same group 1.25x, base <-> MTP 1.5x.
+SPEED_SWITCH_RATIO = 1.25
+SPEED_SWITCH_CROSS = 1.5
 # Every GGUF/Bonsai backend CAN carry mmproj (lazy load), so media never
 # forces a tier switch.
 VISION_CAPABLE = {"gguf-speed", "gguf-range", "gguf-max",
@@ -232,15 +253,16 @@ def family(profile):
 
 
 def effective_profile(wanted, current, est_tokens, need_vision):
-    """Prefer the running backend over the requested tier.
+    """Prefer the running backend, unless the requested tier is much faster.
 
-    A tier switch wipes the server prefix cache (full_reset), forcing a full
-    re-prefill (~60s at 100K tokens). Switch only when the running backend
-    cannot serve: different model family, media needs vision, the estimated
-    prompt exceeds 90% of its window, or the request asks for more parallel
-    slots than the resident backend has. That last clause is what stops a
-    1-slot backend from silently serializing requests meant for a 2/4/8-slot
-    tier.
+    A switch costs a boot and, across weights groups, a full re-prefill; inside
+    a group the slot dump restores the KV. Keep the resident when it can serve
+    and is not materially slower. Switch to the requested tier when it can
+    serve and is faster by SPEED_SWITCH_RATIO (same weights group) or
+    SPEED_SWITCH_CROSS (Qwen base <-> MTP). Without this, a `single192`
+    request is served by the resident `max` at ~33 tok/s instead of the MTP's
+    ~97, and every `write`/`edit` pays 3x. The rule is profile-agnostic:
+    Qwen/Bonsai, base/MTP, 1..8 slots, text/vision.
     """
     if current in PROFILE_WINDOWS:
         # Every GGUF/Bonsai backend carries mmproj: media never forces a
@@ -253,6 +275,16 @@ def effective_profile(wanted, current, est_tokens, need_vision):
                         or PROFILE_SLOTS.get(current, 1)
                         >= PROFILE_SLOTS.get(wanted, 1))
         if enough_slots and est_tokens < 0.9 * PROFILE_WINDOWS[current]:
+            # The requested tier can only justify a switch if it also fits.
+            if est_tokens < 0.9 * PROFILE_WINDOWS.get(wanted, 0):
+                cur_speed = PROFILE_SPEED.get(current, 0)
+                want_speed = PROFILE_SPEED.get(wanted, 0)
+                same_group = (PROFILE_GROUP.get(current)
+                              == PROFILE_GROUP.get(wanted))
+                ratio = (SPEED_SWITCH_RATIO if same_group
+                         else SPEED_SWITCH_CROSS)
+                if want_speed > cur_speed * ratio:
+                    return wanted
             return current
     return wanted
 
@@ -320,6 +352,12 @@ def slot_weights_key(profile):
     """Stable per-weights-file key: the unit a slot dump can be restored into."""
     name = GGUF_FILES.get(profile) or BONSAI_FILES.get(profile) or profile
     return f"{family(profile) or 'x'}-{hashlib.sha1(name.encode()).hexdigest()[:10]}"
+
+
+# Tiers that share a weights file share slot dumps: a switch inside a group
+# restores the KV, across groups it re-prefills. Base Qwen and MTP Qwen are
+# different groups; every Bonsai tier is one group.
+PROFILE_GROUP = {p: slot_weights_key(p) for p in PROFILES}
 
 
 def slot_file_name(profile, slot_id):

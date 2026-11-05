@@ -98,13 +98,13 @@ Guidance for coding agents working in this repository.
   resident unless the requested tier fits and is 1.25x faster in the same
   weights group or 1.5x across (Qwen base <-> MTP; the latter also re-prefills).
   This is what stops a `single192` request from running at the resident
-  `max`'s ~33 tok/s instead of the MTP's ~97. The rule covers Qwen/Bonsai,
+  `max`'s ~33 tok/s instead of the MTP's ~65 sustained (103 on a short reply). The rule covers Qwen/Bonsai,
   base/MTP, 1..8 slots, text/vision.
 - `write`/`edit` latency is **model output, not disk**: the tool executes in
   3–17 ms; the file content (write) or old+new strings (edit) are generated
   token by token at the tier's decode speed. Measured: an 11 KB write ~85 s at
-  31 tok/s vs ~29 s at 97; the `low` 1,536 reasoning budget alone is ~49 s at
-  31 vs ~16 s at 97. Prefer the MTP tier for file-heavy sessions and
+  31 tok/s vs ~45 s at 65; the `low` 1,536 reasoning budget alone is ~49 s at
+  31 vs ~24 s at 65. Prefer the MTP tier for file-heavy sessions and
   `edit`/patch over `write` for changes.
 - The admission gate (`admit_prefill`) serializes arrivals behind an in-flight
   prefill so two prefills never interleave. It reads `/slots`, where

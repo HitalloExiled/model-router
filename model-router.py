@@ -155,14 +155,14 @@ PROFILE_SLOTS = {"gguf-speed": 1, "gguf-range": 1, "gguf-max": 1,
                  "bonsai-penta128": 5, "bonsai-hexa128": 6,
                  "bonsai-octo64": 8, "bonsai-vision": 1}
 
-# Measured decode throughput in tok/s (2026-11-05). The MTP draft tiers are
-# ~3x base Qwen; the Bonsai ternary is ~2x Qwen and its single-slot max is the
-# fastest Bonsai. Values for tiers not benchmarked directly are estimates; the
-# router only uses the relative order. Decode speed is what dominates `write`
-# and `edit` calls: the file text (and the edit's old/new strings) is model
-# output, generated token by token.
+# Measured decode throughput in tok/s (2026-11-05). Qwen MTP peaks at 103 on a
+# 33-token reply but sustains ~65 on the session's 18K prompts; scheduling uses
+# the sustained value. Qwen base ~33; Bonsai max 81, multi 66. Values for tiers
+# not benchmarked directly are estimates; the router uses the relative order.
+# Decode speed dominates `write`/`edit`: the file text (and old/new strings) is
+# model output, generated token by token.
 PROFILE_SPEED = {
-    "gguf-speed": 97, "gguf-single192": 97,
+    "gguf-speed": 65, "gguf-single192": 65,
     "gguf-range": 33, "gguf-max": 33, "gguf-duo": 33, "gguf-duo128": 33,
     "gguf-quad": 33, "gguf-vision": 33,
     "bonsai-max": 81, "bonsai-duo256": 66, "bonsai-trio256": 66,

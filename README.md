@@ -125,12 +125,12 @@ request against a text-only backend triggers a reboot, to add the encoder.
 The router keeps the resident backend unless the requested tier is materially
 faster. Before this rule a `qwen3.8-gguf-single192` request was served by the
 resident `gguf-max` (`reuse gguf-max, fits`) at ~31 tok/s instead of the MTP's
-~97, making every `write`/`edit` 3x slower. `PROFILE_SPEED` covers every
-profile (measured/estimate, decode tok/s):
+~97 on a short reply (~65 sustained), making every `write`/`edit` slower.
+`PROFILE_SPEED` covers every profile (measured/estimate, decode tok/s):
 
 | group | tiers | tok/s |
 |---|---|---|
-| Qwen MTP | `gguf-speed`, `gguf-single192` | 97 |
+| Qwen MTP | `gguf-speed`, `gguf-single192` | 65 (103 short) |
 | Qwen base | `gguf-range`, `gguf-max`, `gguf-duo`, `gguf-duo128`, `gguf-quad`, `gguf-vision` | 33 |
 | Bonsai 1-slot | `bonsai-max` | 81 |
 | Bonsai multi-slot | the other Bonsai tiers | 66 |
@@ -144,9 +144,9 @@ Bonsai, base and MTP, 1..8 slots, text and vision.
 
 Why this matters for tools: a `write` spends 3–17 ms writing the file; the rest
 is the model generating the file content as the tool arguments (measured: an
-11 KB file ~85 s at 31 tok/s, ~29 s at 97). An `edit` is cheaper in arguments
+11 KB file ~85 s at 31, ~45 s at 65). An `edit` is cheaper in arguments
 (2–38 s for old+new) but pays the reasoning (20–66 s): the `low` 1,536-token
-budget alone is ~49 s at 31 tok/s, ~16 s at 97. The lever is the faster tier
+budget alone is ~49 s at 31, ~24 s at 65. The lever is the faster tier
 plus the reasoning budget; `edit`/patch also avoids regenerating the whole
 file, but that is secondary to the tier speed. The MTP tier is for file-heavy
 sessions; `max` is for >192K contexts.

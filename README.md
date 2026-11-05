@@ -123,14 +123,14 @@ request against a text-only backend triggers a reboot, to add the encoder.
 ## Speed-aware tier reuse
 
 The router keeps the resident backend unless the requested tier is materially
-faster. Before this rule a `qwen3.8-gguf-single192` request was served by the
+faster. Before this rule a `qwen3.8-gguf-single200` request was served by the
 resident `gguf-max` (`reuse gguf-max, fits`) at ~31 tok/s instead of the MTP's
 ~97 on a short reply (~65 sustained), making every `write`/`edit` slower.
 `PROFILE_SPEED` covers every profile (measured/estimate, decode tok/s):
 
 | group | tiers | tok/s |
 |---|---|---|
-| Qwen MTP | `gguf-speed`, `gguf-single192` | 65 (103 short) |
+| Qwen MTP | `gguf-speed`, `gguf-single200` | 65 (103 short) |
 | Qwen base | `gguf-range`, `gguf-max`, `gguf-duo`, `gguf-duo128`, `gguf-quad`, `gguf-vision` | 33 |
 | Bonsai 1-slot | `bonsai-max` | 81 |
 | Bonsai multi-slot | the other Bonsai tiers | 66 |

@@ -73,7 +73,7 @@ GGUF_FILES = {
     "gguf-duo128": "Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf",
     "gguf-quad": "Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf",
     "gguf-vision": "Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf",
-    "gguf-single192": "Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
+    "gguf-single200": "Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
 }
 # Bonsai 2 27B (ternary) stack: PrismML fork of llama.cpp. Stock llama.cpp
 # cannot run these packs, so this is a THIRD image — still one backend at a
@@ -128,7 +128,7 @@ SLOT_DISK_MIB = int(os.environ.get("MODEL_ROUTER_SLOT_DISK_MIB", "32768"))
 SLOT_IO_TIMEOUT = float(os.environ.get("MODEL_ROUTER_SLOT_IO_TIMEOUT", "300"))
 
 PROFILES = {"gguf-speed", "gguf-range", "gguf-max", "gguf-duo", "gguf-duo128",
-            "gguf-quad", "gguf-vision", "gguf-single192",
+            "gguf-quad", "gguf-vision", "gguf-single200",
             "bonsai-max", "bonsai-duo256", "bonsai-trio256", "bonsai-trio200",
             "bonsai-duo128",
             "bonsai-quad128", "bonsai-penta128", "bonsai-hexa128",
@@ -137,7 +137,7 @@ PROFILES = {"gguf-speed", "gguf-range", "gguf-max", "gguf-duo", "gguf-duo128",
 PROFILE_WINDOWS = {"gguf-speed": 65536, "gguf-range": 98304,
                    "gguf-max": 262144, "gguf-duo": 98304,
                    "gguf-duo128": 131072, "gguf-quad": 65536,
-                   "gguf-vision": 65536, "gguf-single192": 204800,
+                   "gguf-vision": 65536, "gguf-single200": 204800,
                    "bonsai-max": 262144, "bonsai-duo256": 262144,
                    "bonsai-trio256": 262144, "bonsai-trio200": 204800,
                    "bonsai-duo128": 131072,
@@ -148,7 +148,7 @@ PROFILE_WINDOWS = {"gguf-speed": 65536, "gguf-range": 98304,
 # 4-slot tier is what turns concurrency into a queue, so reuse consults this.
 PROFILE_SLOTS = {"gguf-speed": 1, "gguf-range": 1, "gguf-max": 1,
                  "gguf-duo": 2, "gguf-duo128": 2, "gguf-quad": 4,
-                 "gguf-vision": 1, "gguf-single192": 1,
+                 "gguf-vision": 1, "gguf-single200": 1,
                  "bonsai-max": 1, "bonsai-duo256": 2, "bonsai-trio256": 3,
                  "bonsai-trio200": 3,
                  "bonsai-duo128": 2, "bonsai-quad128": 4,
@@ -162,7 +162,7 @@ PROFILE_SLOTS = {"gguf-speed": 1, "gguf-range": 1, "gguf-max": 1,
 # Decode speed dominates `write`/`edit`: the file text (and old/new strings) is
 # model output, generated token by token.
 PROFILE_SPEED = {
-    "gguf-speed": 65, "gguf-single192": 65,
+    "gguf-speed": 65, "gguf-single200": 65,
     "gguf-range": 33, "gguf-max": 33, "gguf-duo": 33, "gguf-duo128": 33,
     "gguf-quad": 33, "gguf-vision": 33,
     "bonsai-max": 81, "bonsai-duo256": 66, "bonsai-trio256": 66,
@@ -179,14 +179,14 @@ SPEED_SWITCH_CROSS = 1.5
 # forces a tier switch.
 VISION_CAPABLE = {"gguf-speed", "gguf-range", "gguf-max",
                   "gguf-duo", "gguf-duo128", "gguf-quad", "gguf-vision",
-                  "gguf-single192",
+                  "gguf-single200",
                   "bonsai-max", "bonsai-duo256", "bonsai-trio256",
                   "bonsai-trio200", "bonsai-duo128", "bonsai-quad128",
                   "bonsai-penta128", "bonsai-hexa128", "bonsai-octo64",
                   "bonsai-vision"}
 GGUF_ALL = {"gguf-speed", "gguf-range", "gguf-max",
             "gguf-duo", "gguf-duo128", "gguf-quad", "gguf-vision",
-            "gguf-single192"}
+            "gguf-single200"}
 BONSAI_ALL = {"bonsai-max", "bonsai-duo256", "bonsai-trio256",
               "bonsai-trio200", "bonsai-duo128", "bonsai-quad128",
               "bonsai-penta128", "bonsai-hexa128", "bonsai-octo64",
@@ -259,7 +259,7 @@ def effective_profile(wanted, current, est_tokens, need_vision):
     a group the slot dump restores the KV. Keep the resident when it can serve
     and is not materially slower. Switch to the requested tier when it can
     serve and is faster by SPEED_SWITCH_RATIO (same weights group) or
-    SPEED_SWITCH_CROSS (Qwen base <-> MTP). Without this, a `single192`
+    SPEED_SWITCH_CROSS (Qwen base <-> MTP). Without this, a `single200`
     request is served by the resident `max` at ~33 tok/s instead of the MTP's
     ~97, and every `write`/`edit` pays 3x. The rule is profile-agnostic:
     Qwen/Bonsai, base/MTP, 1..8 slots, text/vision.
@@ -737,8 +737,8 @@ def parse_model(model):
         return "gguf-duo", effort
     if "gguf-quad" in base:
         return "gguf-quad", effort
-    if "gguf-single192" in base:
-        return "gguf-single192", effort
+    if "gguf-single200" in base:
+        return "gguf-single200", effort
     if "gguf-max" in base:
         return "gguf-max", effort
     if "gguf-range" in base or "gguf" in base:
@@ -1278,8 +1278,8 @@ STATIC_MODELS = {
          "owned_by": "llama.cpp", "name": "qwen3.8-gguf-quad",
          "context_window": 65536, "max_model_len": 65536,
          "modalities": {"vision": False}},
-        {"id": "qwen3.8-gguf-single192", "object": "model",
-         "owned_by": "llama.cpp", "name": "qwen3.8-gguf-single192",
+        {"id": "qwen3.8-gguf-single200", "object": "model",
+         "owned_by": "llama.cpp", "name": "qwen3.8-gguf-single200",
          "context_window": 204800, "max_model_len": 204800,
          "modalities": {"vision": False}},
         {"id": "qwen3.8-gguf-max", "object": "model", "owned_by": "llama.cpp",

@@ -97,7 +97,7 @@ Guidance for coding agents working in this repository.
   `PROFILE_GROUP` (the slot weights key) drive `effective_profile`. Keep the
   resident unless the requested tier fits and is 1.25x faster in the same
   weights group or 1.5x across (Qwen base <-> MTP; the latter also re-prefills).
-  This is what stops a `single192` request from running at the resident
+  This is what stops a `single200` request from running at the resident
   `max`'s ~33 tok/s instead of the MTP's ~65 sustained (103 on a short reply). The rule covers Qwen/Bonsai,
   base/MTP, 1..8 slots, text/vision.
 - `write`/`edit` latency is **model output, not disk**: the tool executes in

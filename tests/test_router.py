@@ -248,12 +248,12 @@ def main():
         # resident base (33) by 2.9x, so switch; the reverse keeps the faster
         # resident. Same-group switches have a lower bar (the slot restores the
         # KV) than base <-> MTP (which re-prefills the context).
-        ("speed-switch-mtp", "gguf-single192", "gguf-max", 1000, False,
-         "gguf-single192"),
-        ("speed-keep-faster-resident", "gguf-max", "gguf-single192", 1000,
-         False, "gguf-single192"),
-        ("speed-switch-mtp-from-duo", "gguf-single192", "gguf-duo128", 1000,
-         False, "gguf-single192"),
+        ("speed-switch-mtp", "gguf-single200", "gguf-max", 1000, False,
+         "gguf-single200"),
+        ("speed-keep-faster-resident", "gguf-max", "gguf-single200", 1000,
+         False, "gguf-single200"),
+        ("speed-switch-mtp-from-duo", "gguf-single200", "gguf-duo128", 1000,
+         False, "gguf-single200"),
         ("speed-switch-speed-from-range", "gguf-speed", "gguf-range", 1000,
          False, "gguf-speed"),
         ("speed-keep-equal-base", "gguf-max", "gguf-range", 1000, False,
@@ -262,8 +262,8 @@ def main():
          False, "bonsai-duo256"),
         ("speed-bonsai-max-keeps-trio", "bonsai-max", "bonsai-trio200", 1000,
          False, "bonsai-trio200"),
-        ("speed-cross-family-switches", "gguf-single192", "bonsai-duo256",
-         1000, False, "gguf-single192"),
+        ("speed-cross-family-switches", "gguf-single200", "bonsai-duo256",
+         1000, False, "gguf-single200"),
         ("speed-vision-same", "gguf-vision", "gguf-range", 1000, False,
          "gguf-range"),
     ]:
@@ -289,10 +289,10 @@ def main():
     # router reboots a healthy backend on startup.
     I = nr.infer_profile
     for label, args, want in [
-        ("llama-alias-single192",
+        ("llama-alias-single200",
          "-m /models/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf --alias "
-         "qwen3.8-gguf-single192 -c 204800 --parallel 1 --mmproj /m/mmproj.gguf",
-         "gguf-single192"),
+         "qwen3.8-gguf-single200 -c 204800 --parallel 1 --mmproj /m/mmproj.gguf",
+         "gguf-single200"),
         ("llama-alias-max", "--alias qwen3.8-gguf-max -c 262144", "gguf-max"),
         ("llama-no-alias-parallel4", "-m x.gguf --parallel 4", "gguf-quad"),
         ("llama-no-alias-parallel2-128",

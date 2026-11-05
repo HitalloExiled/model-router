@@ -40,8 +40,9 @@ Guidance for coding agents working in this repository.
   return no answer.
 - **The real agent system prompt matters**: with a 13 KB OpenCode prompt +
   `AGENT.md` + toolbelt the Qwen few-shot still cut the realistic from 1,890
-  to 1,631 and the median from 73 to 58, but the no-style Bonsai was better on
-  the realistic (1,885 / 22.2 s vs 2,575 / 29.0 s). Re-run
+  to 1,074 (plain final line, no labels; code tasks stay bare) and the median
+  from 73 to 58, but the no-style Bonsai was better on the realistic (1,885 /
+  22.2 s vs 2,575 / 29.0 s). Re-run
   `scripts/effort-probe.py --client-system-file <real-system>` when the client
   prompt changes.
 - `low`/`medium` do **not** share a template any more on Qwen (`low` vs

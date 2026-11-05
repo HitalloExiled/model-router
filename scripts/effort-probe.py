@@ -40,10 +40,10 @@ ANS = re.compile(r"ANSWER:\s*(.+)", re.I)
 FEWSHOT_STYLE = (
     "Example of the desired style:\n"
     "Question: What is 17*24?\n"
-    "Reasoning: 17*24 = 17*20 + 17*4 = 408.\n"
-    "Answer: 408\n\n"
+    "17*24 = 17*20 + 17*4 = 408.\n"
+    "408\n\n"
     "Solve the next task in the same concise style: at most one sentence of "
-    "reasoning, then the answer."
+    "reasoning, then the answer on its own line, without labels."
 )
 BRIEF_STYLE = (
     "Think briefly: at most one short paragraph. Then answer. Do not "
@@ -105,6 +105,11 @@ PROMPTS = {
                 "slots. Under load, a long tool-call prompt prefills for about "
                 "60 seconds and the other slots decode at roughly 1 token/s. "
                 "Propose a concrete mitigation and the trade-offs." + ANSWER_TAIL,
+    },
+    "code_task": {
+        "cls": "realistic", "expected": None,
+        "text": "Write a Python function add(a, b) that returns the sum. "
+                "Reply with only the function code, no labels or prose.",
     },
 }
 
@@ -371,7 +376,12 @@ def candidates(runner):
             p, "real_qwen_low_prepend", base_body(
                 m, with_system(FEWSHOT_STYLE + "\n\n" + CLIENT_SYSTEM,
                                PROMPTS[p]["text"]),
-                effort="low", budget=2560, seed=runner.seed)),
+                effort="low", budget=1536, seed=runner.seed)),
+        "real_qwen_medium_prepend": lambda p: runner.one(
+            p, "real_qwen_medium_prepend", base_body(
+                m, with_system(FEWSHOT_STYLE + "\n\n" + CLIENT_SYSTEM,
+                               PROMPTS[p]["text"]),
+                effort="medium", budget=2560, seed=runner.seed)),
         "real_qwen_low_append": lambda p: runner.one(
             p, "real_qwen_low_append", base_body(
                 m, with_system(CLIENT_SYSTEM + "\n\n" + FEWSHOT_STYLE,

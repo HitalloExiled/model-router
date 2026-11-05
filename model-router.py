@@ -559,9 +559,10 @@ EFFORT_SUFFIXES = ("none", "low", "medium", "high", "xhigh", "minimal")
 # 9-prompt battery (Qwen b12110 / Bonsai prism-b12128):
 #   - Real agent system prompt (13 KB OpenCode prompt + AGENTS.md + toolbelt):
 #     the Qwen few-shot PREPENDED still wins (100% including the needle, median
-#     58 vs 73 old, realistic 1,631 vs 1,890); appending the style or using the
-#     "think briefly" text dropped to 88% (the needle). Qwen medium uses the
-#     same few-shot now, with the larger budget doing the distinction.
+#     58 vs 73 old, realistic 1,074 vs 1,890; the example's final line has no
+#     label, so code tasks stay bare); appending the style or using the "think
+#     briefly" text dropped to 88% (the needle). Qwen medium uses the same
+#     few-shot now, with the larger budget doing the distinction.
 #     The Bonsai is the opposite: with the real system the no-style medium is
 #     the best realistic (1,885 tokens / 22.2 s vs 2,575 / 29 s with the
 #     few-shot); all variants scored 100%. Bonsai keeps no style.
@@ -592,10 +593,10 @@ EFFORT_POLICY = {
 FEWSHOT_STYLE = (
     "Example of the desired style:\n"
     "Question: What is 17*24?\n"
-    "Reasoning: 17*24 = 17*20 + 17*4 = 408.\n"
-    "Answer: 408\n\n"
+    "17*24 = 17*20 + 17*4 = 408.\n"
+    "408\n\n"
     "Solve the next task in the same concise style: at most one sentence of "
-    "reasoning, then the answer."
+    "reasoning, then the answer on its own line, without labels."
 )
 EFFORT_STYLE = {
     "gguf": {"low": FEWSHOT_STYLE, "medium": FEWSHOT_STYLE},

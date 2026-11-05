@@ -57,9 +57,10 @@ Bonsai prism-b12128):
   median 134 -> 83. The template sentence alone is not enough.
 - Real agent system (13 KB OpenCode prompt + `AGENT.md` + toolbelt): the Qwen
   few-shot **prepended** still wins — 100% (needle included), median 58 vs 73,
-  realistic 1,631 vs 1,890 (37.2 s vs 45.3 s). Appending the style or using
-  “think briefly” dropped to 88% (the needle), so low and medium share the
-  style and the budget does the tier split.
+  realistic **1,074 vs 1,890** (the old policy), and a code task comes out as
+  a bare code block (no `Answer:`/`Reasoning:` labels). Appending the style or
+  using “think briefly” dropped to 88% (the needle), so low and medium share
+  the style and the budget does the tier split.
 - Bonsai: the template low sentence looped the open-ended task (4,096 + no
   answer). With the real agent prompt every variant scored 100%, and the
   **no-style** medium is the best realistic (1,885 tokens / 22.2 s vs 2,575 /

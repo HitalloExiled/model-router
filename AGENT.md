@@ -18,24 +18,36 @@ Guidance for coding agents working in this repository.
 ## Reasoning effort invariants
 
 - Client tiers map to `EFFORT_POLICY` in `model-router.py`:
-  `none`, `low=3072`, `medium=2048 (Qwen) / 6144 (Bonsai)`, `high=8192`,
+  `none`, `low=1536`, `medium=3072 (Qwen) / 6144 (Bonsai)`, `high=8192`,
   `xhigh=unbounded`.
 - The budget is a safety net; the lever is the style in `EFFORT_STYLE`:
-  Qwen `low` gets a one-shot concise example (and the template's `low`),
-  Qwen `medium` a “think briefly” system prompt, Bonsai `low` the same example
-  on the **medium** template. The Bonsai template `low` sentence makes it loop
-  on open-ended prompts; keep Bonsai low on `medium`.
+  Qwen `low` and `medium` get the same one-shot concise example (prepended);
+  the budget does the tier split. Bonsai gets **no style**: its own real agent
+  prompt is already concise, and with the example the open-ended task hit the
+  cap (2,575 vs 1,885 without it). The template `low` sentence makes Bonsai
+  loop; keep it on `medium`.
 - Styles are prepended to the client's system prompt (or inserted as a system
   message), never replacing it; `inject_style` handles OpenAI string/list and
-  Anthropic `system` string/list.
+  Anthropic `system` string/list. The real-system A/B showed prepend 100% vs
+  append 88% on Qwen (the needle); do not flip it.
+- `low` caps at 1,536, below the measured realistic natural (Qwen 1,631,
+  Bonsai 1,885), so it really is the lighter tier; the forced transition plus
+  the answer reserve keeps the answer. `medium` keeps the larger budget.
 - The effective budget is dynamic:
   `min(configured, max_tokens - ANSWER_RESERVE)` with reserve 1,536; below 256
   tokens of room it halves instead. `high`/`xhigh` are configured unbounded,
   so without the dynamic cap a 4k client request can spend all 4k thinking and
   return no answer.
-- `low`/`medium` do **not** share a template any more (Qwen low vs medium).
-  Changing effort mid-session changes the prompt prefix and re-prefills; the
-  slot persistence only covers a backend restart.
+- **The real agent system prompt matters**: with a 13 KB OpenCode prompt +
+  `AGENT.md` + toolbelt the Qwen few-shot still cut the realistic from 1,890
+  to 1,631 and the median from 73 to 58, but the no-style Bonsai was better on
+  the realistic (1,885 / 22.2 s vs 2,575 / 29.0 s). Re-run
+  `scripts/effort-probe.py --client-system-file <real-system>` when the client
+  prompt changes.
+- `low`/`medium` do **not** share a template any more on Qwen (`low` vs
+  `medium`); on Bonsai both use `medium`. Changing effort mid-session changes
+  the prompt prefix and re-prefills; the slot persistence only covers a
+  backend restart.
 - `high` maps to `xhigh` because the Qwen3.8 template rejects `high`;
   `minimal` aliases `low`.
 - Budgets are llama.cpp-only (`reasoning_budget_tokens`); gate on `LLAMA_ALL`

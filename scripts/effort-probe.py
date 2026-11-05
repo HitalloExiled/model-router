@@ -36,6 +36,21 @@ ANSWER_TAIL = " End with ANSWER: <value>."
 NUM = re.compile(r"-?\d+(?:\.\d+)?")
 ANS = re.compile(r"ANSWER:\s*(.+)", re.I)
 
+# Production style texts (must match model-router.py).
+FEWSHOT_STYLE = (
+    "Example of the desired style:\n"
+    "Question: What is 17*24?\n"
+    "Reasoning: 17*24 = 17*20 + 17*4 = 408.\n"
+    "Answer: 408\n\n"
+    "Solve the next task in the same concise style: at most one sentence of "
+    "reasoning, then the answer."
+)
+BRIEF_STYLE = (
+    "Think briefly: at most one short paragraph. Then answer. Do not "
+    "enumerate alternatives."
+)
+CLIENT_SYSTEM = ""
+
 PROMPTS = {
     # -- graded: exact answers ------------------------------------------------
     "math_wh": {
@@ -347,6 +362,53 @@ def candidates(runner):
         "qwen_xhigh_dyn": lambda p: runner.one(p, "qwen_xhigh_dyn", base_body(
             m, [user(PROMPTS[p]["text"])], effort="xhigh", budget=2560,
             seed=runner.seed)),
+        # -- real agent system prompt: the few-shot must survive a long system;
+        # -- prepend vs append tests recency. -------------------------------
+        "real_qwen_old_low": lambda p: runner.one(p, "real_qwen_old_low", base_body(
+            m, with_system(CLIENT_SYSTEM, PROMPTS[p]["text"]),
+            effort="medium", budget=2048, seed=runner.seed)),
+        "real_qwen_low_prepend": lambda p: runner.one(
+            p, "real_qwen_low_prepend", base_body(
+                m, with_system(FEWSHOT_STYLE + "\n\n" + CLIENT_SYSTEM,
+                               PROMPTS[p]["text"]),
+                effort="low", budget=2560, seed=runner.seed)),
+        "real_qwen_low_append": lambda p: runner.one(
+            p, "real_qwen_low_append", base_body(
+                m, with_system(CLIENT_SYSTEM + "\n\n" + FEWSHOT_STYLE,
+                               PROMPTS[p]["text"]),
+                effort="low", budget=2560, seed=runner.seed)),
+        "real_qwen_medium_plain": lambda p: runner.one(
+            p, "real_qwen_medium_plain", base_body(
+                m, with_system(CLIENT_SYSTEM, PROMPTS[p]["text"]),
+                effort="medium", budget=2048, seed=runner.seed)),
+        "real_qwen_medium_append": lambda p: runner.one(
+            p, "real_qwen_medium_append", base_body(
+                m, with_system(CLIENT_SYSTEM + "\n\n" + BRIEF_STYLE,
+                               PROMPTS[p]["text"]),
+                effort="medium", budget=2048, seed=runner.seed)),
+        "real_bonsai_old_low": lambda p: runner.one(
+            p, "real_bonsai_old_low", base_body(
+                m, with_system(CLIENT_SYSTEM, PROMPTS[p]["text"]),
+                effort="medium", budget=4096, seed=runner.seed)),
+        "real_bonsai_low_prepend": lambda p: runner.one(
+            p, "real_bonsai_low_prepend", base_body(
+                m, with_system(FEWSHOT_STYLE + "\n\n" + CLIENT_SYSTEM,
+                               PROMPTS[p]["text"]),
+                effort="medium", budget=2560, seed=runner.seed)),
+        "real_bonsai_low_append": lambda p: runner.one(
+            p, "real_bonsai_low_append", base_body(
+                m, with_system(CLIENT_SYSTEM + "\n\n" + FEWSHOT_STYLE,
+                               PROMPTS[p]["text"]),
+                effort="medium", budget=2560, seed=runner.seed)),
+        "real_bonsai_medium_plain": lambda p: runner.one(
+            p, "real_bonsai_medium_plain", base_body(
+                m, with_system(CLIENT_SYSTEM, PROMPTS[p]["text"]),
+                effort="medium", budget=2560, seed=runner.seed)),
+        "real_bonsai_medium_append": lambda p: runner.one(
+            p, "real_bonsai_medium_append", base_body(
+                m, with_system(CLIENT_SYSTEM + "\n\n" + BRIEF_STYLE,
+                               PROMPTS[p]["text"]),
+                effort="medium", budget=2560, seed=runner.seed)),
     }
 
 
@@ -357,9 +419,15 @@ def main():
     ap.add_argument("--suite", choices=["pilot", "full"], default="pilot")
     ap.add_argument("--candidates", nargs="+", default=None)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--client-system-file", default=None,
+                    help="real agent system prompt to put around the style")
     ap.add_argument("--out", default="/tmp/opencode/effort-ab.json")
     args = ap.parse_args()
 
+    global CLIENT_SYSTEM
+    if args.client_system_file:
+        with open(args.client_system_file) as f:
+            CLIENT_SYSTEM = f.read()
     runner = Runner(args.url, args.model, args.seed)
     cands = candidates(runner)
     selected = args.candidates or list(cands)

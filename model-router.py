@@ -557,31 +557,28 @@ EFFORT_SUFFIXES = ("none", "low", "medium", "high", "xhigh", "minimal")
 #
 # The template only accepts xhigh|medium|low. Measured 2026-11-04 on a
 # 9-prompt battery (Qwen b12110 / Bonsai prism-b12128):
-#   - Qwen low: the template's low sentence + a one-example few-shot cut the
-#     realistic task from 1,360 to 991 reasoning tokens (42.6 s -> 30.5 s) at
-#     100% accuracy; the median fell 134 -> 83.
-#   - Qwen medium: the medium template adds no instruction; a "think briefly"
-#     system prompt cut the realistic 2,243 -> 1,225 tokens at 100%.
-#   - Bonsai low: the template's low sentence made it loop on the open-ended
-#     prompt. The medium template + the same few-shot answers in 2,052 tokens
-#     (24.1 s); the no-style medium answers in 1,685.
-#   - high/xhigh: the model can run past the client's max_tokens and return no
-#     answer at all. The dynamic cap below (max_tokens - reserve) forces the
-#     transition and leaves room for the answer (Qwen xhigh: 4096+0 ->
-#     2,574+378).
-# The configured budgets are safety ceilings above the observed natural
-# ranges; the style and the dynamic cap are the levers.
+#   - Real agent system prompt (13 KB OpenCode prompt + AGENTS.md + toolbelt):
+#     the Qwen few-shot PREPENDED still wins (100% including the needle, median
+#     58 vs 73 old, realistic 1,631 vs 1,890); appending the style or using the
+#     "think briefly" text dropped to 88% (the needle). Qwen medium uses the
+#     same few-shot now, with the larger budget doing the distinction.
+#     The Bonsai is the opposite: with the real system the no-style medium is
+#     the best realistic (1,885 tokens / 22.2 s vs 2,575 / 29 s with the
+#     few-shot); all variants scored 100%. Bonsai keeps no style.
+#   - `low` caps at 1,536 so it really is the lighter tier: the Qwen realistic
+#     natural is 1,631, the Bonsai 1,885; the cap forces the transition and
+#     leaves the answer. `medium` keeps the larger configured budget.
 EFFORT_POLICY = {
     "gguf": {
         "none": ("none", None),
-        "low": ("low", 3072),
-        "medium": ("medium", 2048),
+        "low": ("low", 1536),
+        "medium": ("medium", 3072),
         "high": ("xhigh", 8192),
         "xhigh": ("xhigh", None),
     },
     "bonsai": {
         "none": ("none", None),
-        "low": ("medium", 3072),
+        "low": ("medium", 1536),
         "medium": ("medium", 6144),
         "high": ("xhigh", 8192),
         "xhigh": ("xhigh", None),
@@ -589,8 +586,9 @@ EFFORT_POLICY = {
 }
 
 # One concise example beats an abstract instruction: the template's own low
-# sentence was not enough for either family. The Bonsai keeps the medium
-# template for `low` because the low sentence made it loop.
+# sentence was not enough for Qwen. It is prepended to the client system. The
+# Bonsai has no style: its own prompt is already concise, and the example made
+# the open-ended task hit the cap.
 FEWSHOT_STYLE = (
     "Example of the desired style:\n"
     "Question: What is 17*24?\n"
@@ -599,13 +597,8 @@ FEWSHOT_STYLE = (
     "Solve the next task in the same concise style: at most one sentence of "
     "reasoning, then the answer."
 )
-BRIEF_STYLE = (
-    "Think briefly: at most one short paragraph. Then answer. Do not "
-    "enumerate alternatives."
-)
 EFFORT_STYLE = {
-    "gguf": {"low": FEWSHOT_STYLE, "medium": BRIEF_STYLE},
-    "bonsai": {"low": FEWSHOT_STYLE},
+    "gguf": {"low": FEWSHOT_STYLE, "medium": FEWSHOT_STYLE},
 }
 
 

@@ -40,29 +40,36 @@ the model reason less; the budget is only the safety net:
 | tier | Qwen template | Bonsai template | style | configured budget |
 |---|---|---|---|---|
 | `none` | thinking off | thinking off | — | — |
-| `low` | `low` | `medium` | one-shot concise example | 3072 |
-| `medium` | `medium` | `medium` | “think briefly” (Qwen) | 2048 / 6144 |
+| `low` | `low` | `medium` | one-shot example (Qwen) | 1536 |
+| `medium` | `medium` | `medium` | one-shot example (Qwen) | 3072 / 6144 |
 | `high` | `xhigh` | `xhigh` | — | 8192 |
 | `xhigh` | `xhigh` | `xhigh` | — | unlimited |
 
 `high` maps to `xhigh` because the template rejects `high`; `minimal` is an
 alias for `low`. Budgets use llama.cpp's `reasoning_budget_tokens`, and the
-style is prepended to the client's system prompt, never replacing it.
+Qwen style is prepended to the client's system prompt, never replacing it.
 
-Why the styles are family-specific (measured 2026-11-05 on a 9-prompt battery,
-Qwen b12110 / Bonsai prism-b12128):
+Why this shape (measured 2026-11-05 on a 9-prompt battery, Qwen b12110 /
+Bonsai prism-b12128):
 
-- Qwen `low` with the template's low sentence + a one-example few-shot: the
-  realistic task went 1,360 -> 991 reasoning tokens (42.6 s -> 30.5 s) at
-  100% accuracy; median 134 -> 83.
-- Qwen `medium` with a “think briefly” system prompt: 2,243 -> 1,225 tokens at
-  100%.
-- Bonsai `low` with the template's low sentence **looped** on the open-ended
-  task (4,096 + no answer). The medium template + the same few-shot answers in
-  2,052 tokens (24.1 s); the no-style medium answers in 1,685.
+- Bare prompt: Qwen `low` with the template low sentence + a one-example
+  few-shot went 1,360 -> 991 reasoning tokens (42.6 s -> 30.5 s) at 100%;
+  median 134 -> 83. The template sentence alone is not enough.
+- Real agent system (13 KB OpenCode prompt + `AGENT.md` + toolbelt): the Qwen
+  few-shot **prepended** still wins — 100% (needle included), median 58 vs 73,
+  realistic 1,631 vs 1,890 (37.2 s vs 45.3 s). Appending the style or using
+  “think briefly” dropped to 88% (the needle), so low and medium share the
+  style and the budget does the tier split.
+- Bonsai: the template low sentence looped the open-ended task (4,096 + no
+  answer). With the real agent prompt every variant scored 100%, and the
+  **no-style** medium is the best realistic (1,885 tokens / 22.2 s vs 2,575 /
+  29.0 s with the few-shot). Bonsai keeps no style.
+- `low` caps at 1,536 (Qwen realistic natural 1,631, Bonsai 1,885): the cap
+  forces the transition and leaves the answer, while `medium` keeps the larger
+  configured budget.
 - `high`/`xhigh` used to run past the client's `max_tokens` and return no
-  answer. The budget is now dynamic: `min(configured, max_tokens - 1536)`, so
-  a 4k request thinks for 2,560 and keeps 1,536 for the answer (Qwen xhigh:
+  answer. The budget is dynamic: `min(configured, max_tokens - 1536)`, so a
+  4k request thinks for 2,560 and keeps 1,536 for the answer (Qwen xhigh:
   4,096 + 0 -> 2,574 + 378). A tiny `max_tokens` halves instead of starving
   the answer.
 

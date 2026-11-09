@@ -37,7 +37,7 @@ debugging aid, not a replacement for the unit.
 Client tier -> template, style and thinking budget. The style is what makes
 the model reason less; the budget is only the safety net:
 
-| tier | Qwen template | Bonsai template | style | configured budget |
+| tier | Qwen template | Bonsai template | style | configured budget (no tools) |
 |---|---|---|---|---|
 | `none` | thinking off | thinking off | — | — |
 | `low` | `low` | `medium` | one-shot example (Qwen) | 1536 |
@@ -68,6 +68,16 @@ Bonsai prism-b12128):
 - `low` caps at 1,536 (Qwen realistic natural 1,631, Bonsai 1,885): the cap
   forces the transition and leaves the answer, while `medium` keeps the larger
   configured budget.
+- **Tool loops are the exception on Bonsai.** PrismML documents malformed
+  tool calls as an open model limitation; the 1,536 cap forced the transition
+  message mid-plan and the model then emitted a malformed XML `edit` (huge
+  `oldString`, no `newString`). Any Bonsai request carrying `tools` (or a
+  `tool` message) gets `TOOL_BUDGET_FLOOR = 16384` thinking tokens for every
+  tier and no `reasoning_budget_message`; PrismML's tested agent profile uses
+  the same 16k budget. Qwen tiers keep their tuned caps, and the dynamic
+  `max_tokens` cap plus an explicit client budget still win.
+- The Bonsai server runs with `--reasoning-format deepseek`, so the thought
+  stays in `reasoning_content` instead of leaking into the visible content.
 - `high`/`xhigh` used to run past the client's `max_tokens` and return no
   answer. The budget is dynamic: `min(configured, max_tokens - 1536)`, so a
   4k request thinks for 2,560 and keeps 1,536 for the answer (Qwen xhigh:

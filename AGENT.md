@@ -33,6 +33,14 @@ Guidance for coding agents working in this repository.
 - `low` caps at 1,536, below the measured realistic natural (Qwen 1,631,
   Bonsai 1,885), so it really is the lighter tier; the forced transition plus
   the answer reserve keeps the answer. `medium` keeps the larger budget.
+- **Bonsai tool loops ignore those caps**: a request carrying `tools` (or a
+  `tool`/`tool_result` message) gets `TOOL_BUDGET_FLOOR = 16384` thinking
+  tokens and no `reasoning_budget_message`. The 1,536 `low` cap forced the
+  transition mid-plan and produced malformed XML calls (huge `oldString`,
+  missing `newString`); PrismML lists this as an open model limitation and its
+  tested agent profile uses the same 16k budget. The dynamic `max_tokens` cap
+  and an explicit client budget still win. Qwen keeps its tuned caps. The
+  Bonsai server also passes `--reasoning-format deepseek`.
 - The effective budget is dynamic:
   `min(configured, max_tokens - ANSWER_RESERVE)` with reserve 1,536; below 256
   tokens of room it halves instead. `high`/`xhigh` are configured unbounded,

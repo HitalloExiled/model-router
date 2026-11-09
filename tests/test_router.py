@@ -64,6 +64,10 @@ def main():
 
     P = "/v1/chat/completions"
     img = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
+    TOOLS = {"tools": [{"type": "function",
+                        "function": {"name": "x",
+                                     "parameters": {"type": "object",
+                                                    "properties": {}}}}]}
 
     def norm(model, content="hi", effort=None, extra=None,
              final_profile=None, path=P):
@@ -125,6 +129,25 @@ def main():
          ("bonsai-trio256", "medium", 6144)),
         ("bonsai-high-maps-xhigh", ("bonsai-2-27b-octo64-high",),
          ("bonsai-octo64", "xhigh", 8192)),
+        # A tool loop raises every Bonsai tier to the agent budget floor; the
+        # Qwen tiers keep their tuned caps (they do not show the malformed
+        # tool-call failure).
+        ("bonsai-low-tools", ("bonsai-2-27b-quad128-low", "hi", None, TOOLS),
+         ("bonsai-quad128", "medium", 16384)),
+        ("bonsai-medium-tools",
+         ("bonsai-2-27b-trio256-medium", "hi", None, TOOLS),
+         ("bonsai-trio256", "medium", 16384)),
+        ("bonsai-high-tools", ("bonsai-2-27b-octo64-high", "hi", None, TOOLS),
+         ("bonsai-octo64", "xhigh", 16384)),
+        ("bonsai-xhigh-tools", ("bonsai-2-27b-max-xhigh", "hi", None, TOOLS),
+         ("bonsai-max", "xhigh", 16384)),
+        ("bonsai-tool-result-only",
+         ("bonsai-2-27b-max-low", "hi", None,
+          {"messages": [{"role": "tool", "content": "ok"}]}),
+         ("bonsai-max", "medium", 16384)),
+        ("gguf-low-tools-unchanged",
+         ("qwen3.8-gguf-max-low", "hi", None, TOOLS),
+         ("gguf-max", "low", 1536)),
     ]:
         check(f"norm:{label}", chat(*args), want)
 
@@ -158,6 +181,9 @@ def main():
          ("gguf-max", "<ABSENT>", "<ABSENT>", "<ABSENT>", False)),
         ("bonsai-low-messages", ("bonsai-2-27b-quad128-low",),
          ("bonsai-quad128", "medium", True, 1536, True)),
+        ("bonsai-tool-loop-messages",
+         ("bonsai-2-27b-quad128-low", None, TOOLS),
+         ("bonsai-quad128", "medium", True, 16384, True)),
         ("reuse-budget-follows-tier",
          ("qwen3.8-gguf-max-low", None, None, "bonsai-max"),
          ("bonsai-max", "medium", True, 1536, True)),
@@ -434,6 +460,36 @@ def main():
     P(d, "/v1/chat/completions", "low", None, meta, notes)
     check("effortpol:unknown-family-cap",
           d.get("reasoning_budget_tokens"), 1536)
+
+    # Tool loops never get the forced transition message: the 16k floor means
+    # the natural reasoning fits, and the message itself anchored the model
+    # into emitting a malformed call after it.
+    for tier in ("low", "medium", "high", "xhigh"):
+        d = {"model": "x", **TOOLS}
+        meta, notes = {}, []
+        P(d, "/v1/chat/completions", tier, "bonsai", meta, notes)
+        check(f"effortpol:tools-{tier}-floor",
+              d.get("reasoning_budget_tokens"), 16384)
+        check(f"effortpol:tools-{tier}-no-msg",
+              "reasoning_budget_message" in d, False)
+        check(f"effortpol:tools-{tier}-meta",
+              bool(meta.get("tool_loop")), True)
+    # A small client max_tokens still bounds it (answer reserve).
+    d = {"model": "x", "max_tokens": 4096, **TOOLS}
+    meta, notes = {}, []
+    P(d, "/v1/chat/completions", "low", "bonsai", meta, notes)
+    check("effortpol:tools-dynamic-cap",
+          d.get("reasoning_budget_tokens"), 4096 - nr.ANSWER_RESERVE)
+    check("effortpol:tools-dynamic-cap-no-msg",
+          "reasoning_budget_message" in d, False)
+    # An explicit client budget is never overwritten.
+    d = {"model": "x", "reasoning_budget_tokens": 2048, **TOOLS}
+    meta, notes = {}, []
+    P(d, "/v1/chat/completions", "low", "bonsai", meta, notes)
+    check("effortpol:tools-client-budget",
+          d.get("reasoning_budget_tokens"), 2048)
+    check("effortpol:tools-client-budget-no-msg",
+          "reasoning_budget_message" in d, False)
 
     # ---- style injection + dynamic budget ----
     def body_for(model, extra=None, path="/v1/chat/completions"):

@@ -653,6 +653,16 @@ BUDGET_KEYS = ("reasoning_budget_tokens", "thinking_budget_tokens")
 # frequently emits EOS and the turn ends with no answer at all.
 BUDGET_MESSAGE = "\n\nOkay, I have thought enough. Time to write the final answer."
 
+# Bonsai 2 in a tool loop needs room to finish the plan before it emits the
+# call. Its `low` 1,536 cap forced the transition message mid-plan, and the
+# model then produced malformed XML tool calls (huge oldString, no newString).
+# PrismML documents malformed tool calls as an open model limitation and the
+# tested agent profile uses a 16,384-token thinking budget; use that for every
+# Bonsai tier when the request carries tools. The transition message is not
+# injected here: at 16k the natural reasoning (730-4,242) never hits the cap,
+# so the forced-close path is not expected.
+TOOL_BUDGET_FLOOR = 16384
+
 # Leave the model room to answer after the forced transition. 1,536 covers
 # the measured answers (6-1,100 tokens) while still letting a 4k request think
 # for 2,560 tokens. A tiny max_tokens halves instead of starving the answer.
@@ -772,6 +782,29 @@ def has_media(decoded):
                         return True
     except Exception:
         pass
+    return False
+
+
+def has_tool_context(decoded):
+    """True when the request carries tool schemas or tool results.
+
+    Agent clients send the `tools` array on every turn, so this also catches
+    requests that arrive mid-loop. Anthropic-style tool results live inside a
+    user message's content parts.
+    """
+    if decoded.get("tools"):
+        return True
+    for msg in decoded.get("messages", []) or []:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") in ("tool", "function"):
+            return True
+        content = msg.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if (isinstance(part, dict)
+                        and part.get("type") in ("tool_result", "tool_use")):
+                    return True
     return False
 
 
@@ -1102,6 +1135,13 @@ def apply_effort_policy(decoded, path, effort, family, meta, notes):
     """
     template, configured = effort_policy(family)[effort]
     meta["template"] = template
+    # Bonsai in a tool loop keeps enough thinking to reach the call; see
+    # TOOL_BUDGET_FLOOR. This covers every tier and every effort.
+    tool_loop = family == "bonsai" and has_tool_context(decoded)
+    if tool_loop:
+        configured = TOOL_BUDGET_FLOOR
+        meta["tool_loop"] = True
+        notes.append(f"tool loop budget {TOOL_BUDGET_FLOOR}")
     mode = client_thinking_mode(decoded, path)
     if mode == "disabled":
         notes.append("thinking disabled by client")
@@ -1169,7 +1209,7 @@ def apply_effort_policy(decoded, path, effort, family, meta, notes):
     # with EOS instead of an answer (Bonsai: ~50% of capped turns in long
     # agentic contexts). Give it a transition first, whoever set the budget.
     # An explicit client message still wins.
-    if capped:
+    if capped and not tool_loop:
         decoded.setdefault("reasoning_budget_message", BUDGET_MESSAGE)
     return True
 

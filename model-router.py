@@ -661,6 +661,11 @@ BUDGET_MESSAGE = "\n\nOkay, I have thought enough. Time to write the final answe
 # Bonsai tier when the request carries tools. The transition message is not
 # injected here: at 16k the natural reasoning (730-4,242) never hits the cap,
 # so the forced-close path is not expected.
+# Measured 2026-11-09 on a replay of the exact failing turn (98K context):
+# the old 1,536 cap hit 29/32 turns but reproduced 0 malformed calls, so the
+# floor removes the trigger rather than proving a correction; it costs ~28%
+# median / ~51% p90 latency and ~32% more tokens. Kept for safety, matching
+# the vendor agent profile.
 TOOL_BUDGET_FLOOR = 16384
 
 # Leave the model room to answer after the forced transition. 1,536 covers

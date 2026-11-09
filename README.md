@@ -76,6 +76,12 @@ Bonsai prism-b12128):
   tier and no `reasoning_budget_message`; PrismML's tested agent profile uses
   the same 16k budget. Qwen tiers keep their tuned caps, and the dynamic
   `max_tokens` cap plus an explicit client budget still win.
+- A 2026-11-09 replay of the exact failing turn (~98K-token context, 32
+  old-policy samples) hit the 1,536 cap in 29/32 turns but reproduced **0**
+  malformed calls, so the floor removes the trigger rather than proving a
+  correction. It costs ~28% median / ~51% p90 latency and ~32% more tokens
+  (no difference between 8k and 16k in the measured distribution). Kept for
+  safety; revert to the 1,536 caps only if latency outweighs the risk.
 - The Bonsai server runs with `--reasoning-format deepseek`, so the thought
   stays in `reasoning_content` instead of leaking into the visible content.
 - `high`/`xhigh` used to run past the client's `max_tokens` and return no

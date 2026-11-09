@@ -41,6 +41,12 @@ Guidance for coding agents working in this repository.
   tested agent profile uses the same 16k budget. The dynamic `max_tokens` cap
   and an explicit client budget still win. Qwen keeps its tuned caps. The
   Bonsai server also passes `--reasoning-format deepseek`.
+- **Measured 2026-11-09** on a replay of the exact failing turn (~98K-token
+  context, 32 old-policy samples): the 1,536 cap hit 29/32 turns but produced
+  **0** malformed calls. The floor removes the trigger, not a proven
+  correction, and costs ~28% median / ~51% p90 latency and ~32% more tokens
+  (8k and 16k behaved identically). Keep it for safety unless latency is the
+  priority.
 - The effective budget is dynamic:
   `min(configured, max_tokens - ANSWER_RESERVE)` with reserve 1,536; below 256
   tokens of room it halves instead. `high`/`xhigh` are configured unbounded,

@@ -36,12 +36,15 @@ resolve_stack() {
 GGUF_STACK="$(resolve_stack gguf-stack)"
 BONSAI_STACK="$(resolve_stack bonsai-stack)"
 MODEL_ROUTER="${ROOT_DIR}"
+# The router is the .NET 10 AOT port (single-file ELF). Older checkouts ran
+# model-router.py; MODEL_ROUTER_BIN overrides the binary path.
+ROUTER_BIN="${MODEL_ROUTER_BIN:-${ROOT_DIR}/bin/Release/net10.0/linux-x64/publish/model-router}"
 
 BONSAI_IMAGE="${NINFER_BONSAI_IMAGE:-bonsai-llama-4090:sm89}"
 
 ROUTER_PORT="${MODEL_ROUTER_PORT:-18089}"
 BACKEND_PORT="${MODEL_ROUTER_BACKEND_PORT:-8080}"
-IDLE_SEC="${MODEL_ROUTER_IDLE_SEC:-900}"
+IDLE_SEC="${MODEL_ROUTER_IDLE_SEC:-21600}"
 
 UNIT_DIR="${HOME}/.config/systemd/user"
 UNIT_FILE="${UNIT_DIR}/model-router.service"
@@ -183,6 +186,11 @@ fi
 # ---------------------------------------------------------------------------
 # 4. systemd user unit
 # ---------------------------------------------------------------------------
+if [[ ! -x "${ROUTER_BIN}" ]]; then
+  log "Building the .NET router (${ROUTER_BIN})..."
+  bash "${SCRIPT_DIR}/build-router.sh"
+fi
+
 log "Installing systemd user unit: model-router.service"
 mkdir -p "${UNIT_DIR}"
 
@@ -193,7 +201,7 @@ Description=Model router (RTX 4090)
 [Service]
 Type=simple
 WorkingDirectory=${ROOT_DIR}
-ExecStart=/usr/bin/python3 ${ROOT_DIR}/model-router.py
+ExecStart=${ROUTER_BIN}
 Environment=MODEL_ROUTER_LLAMA_SERVE_SH=${GGUF_STACK}/serve-llama.sh
 Environment=MODEL_ROUTER_BONSAI_SERVE_SH=${BONSAI_STACK}/serve-bonsai.sh
 Environment=NINFER_GGUF_DIR=${GGUF_STACK}/models

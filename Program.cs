@@ -11,13 +11,12 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelRouter;
 
 // Idle: advertise both variants so pickers work cold (python STATIC_MODELS).
-const string StaticModels = " {\"object\": \"list\", \"data\": [{\"id\": \"qwen3.8-27b-64k\", \"object\": \"model\", \"owned_by\": \"ninfer\", \"name\": \"qwen3.8-27b-64k\", \"context_window\": 65536, \"max_model_len\": 65536, \"modalities\": {\"vision\": false}}, {\"id\": \"qwen3.8-27b\", \"object\": \"model\", \"owned_by\": \"ninfer\", \"name\": \"qwen3.8-27b\", \"context_window\": 131072, \"max_model_len\": 131072, \"modalities\": {\"vision\": false}}, {\"id\": \"qwen3.8-27b-max\", \"object\": \"model\", \"owned_by\": \"ninfer\", \"name\": \"qwen3.8-27b-max\", \"context_window\": 196608, \"max_model_len\": 196608, \"modalities\": {\"vision\": false}}, {\"id\": \"qwen3.6-35b-vision\", \"object\": \"model\", \"owned_by\": \"ninfer\", \"name\": \"qwen3.6-35b-vision\", \"context_window\": 16384, \"max_model_len\": 16384, \"modalities\": {\"vision\": true}}, {\"id\": \"qwen3.8-27b-256k\", \"object\": \"model\", \"owned_by\": \"ninfer\", \"name\": \"qwen3.8-27b-256k\", \"context_window\": 262144, \"max_model_len\": 262144, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-max\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-max\", \"context_window\": 262144, \"max_model_len\": 262144, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-duo256\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-duo256\", \"context_window\": 262144, \"max_model_len\": 262144, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-trio256\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-trio256\", \"context_window\": 262144, \"max_model_len\": 262144, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-trio200\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-trio200\", \"context_window\": 204800, \"max_model_len\": 204800, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-duo128\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-duo128\", \"context_window\": 131072, \"max_model_len\": 131072, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-quad128\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-quad128\", \"context_window\": 131072, \"max_model_len\": 131072, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-penta128\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-penta128\", \"context_window\": 131072, \"max_model_len\": 131072, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-hexa128\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-hexa128\", \"context_window\": 131072, \"max_model_len\": 131072, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-octo64\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-octo64\", \"context_window\": 65536, \"max_model_len\": 65536, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-vision\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-vision\", \"context_window\": 65536, \"max_model_len\": 65536, \"modalities\": {\"vision\": true}}]}" ;
+const string StaticModels = "{\"object\": \"list\", \"data\": [{\"id\": \"qwen3.8-gguf-duo128\", \"object\": \"model\", \"owned_by\": \"llama.cpp\", \"name\": \"qwen3.8-gguf-duo128\", \"context_window\": 131072, \"max_model_len\": 131072, \"modalities\": {\"vision\": false}}, {\"id\": \"qwen3.8-gguf-quad\", \"object\": \"model\", \"owned_by\": \"llama.cpp\", \"name\": \"qwen3.8-gguf-quad\", \"context_window\": 65536, \"max_model_len\": 65536, \"modalities\": {\"vision\": false}}, {\"id\": \"qwen3.8-gguf-single200\", \"object\": \"model\", \"owned_by\": \"llama.cpp\", \"name\": \"qwen3.8-gguf-single200\", \"context_window\": 204800, \"max_model_len\": 204800, \"modalities\": {\"vision\": false}}, {\"id\": \"qwen3.8-gguf-max\", \"object\": \"model\", \"owned_by\": \"llama.cpp\", \"name\": \"qwen3.8-gguf-max\", \"context_window\": 262144, \"max_model_len\": 262144, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-max\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-max\", \"context_window\": 262144, \"max_model_len\": 262144, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-duo256\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-duo256\", \"context_window\": 262144, \"max_model_len\": 262144, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-trio256\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-trio256\", \"context_window\": 262144, \"max_model_len\": 262144, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-trio200\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-trio200\", \"context_window\": 204800, \"max_model_len\": 204800, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-duo128\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-duo128\", \"context_window\": 131072, \"max_model_len\": 131072, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-quad128\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-quad128\", \"context_window\": 131072, \"max_model_len\": 131072, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-penta128\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-penta128\", \"context_window\": 131072, \"max_model_len\": 131072, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-hexa128\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-hexa128\", \"context_window\": 131072, \"max_model_len\": 131072, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-octo64\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-octo64\", \"context_window\": 65536, \"max_model_len\": 65536, \"modalities\": {\"vision\": false}}, {\"id\": \"bonsai-2-27b-vision\", \"object\": \"model\", \"owned_by\": \"prism\", \"name\": \"bonsai-2-27b-vision\", \"context_window\": 65536, \"max_model_len\": 65536, \"modalities\": {\"vision\": true}}]}";
 
-var app = WebApplication.CreateBuilder().Build();
-
-// Single resident backend (adopt, idle-watch) + relay state.
+var builder = WebApplication.CreateBuilder();
 var backend = new BackendManager();
-app.Services.AddSingleton(backend);
+builder.Services.AddSingleton(backend);
+var app = builder.Build();
 
 // Long timeout for the forward leg (python http.client timeout=3600).
 var fwd = new HttpClient { Timeout = TimeSpan.FromHours(1) };
@@ -31,14 +30,23 @@ var idleCts = new CancellationTokenSource();
 _ = backend.IdleWatchAsync(idleCts.Token);
 
 // One pipeline, mirrors do_GET / do_POST / _relay.
-app.Use(async (ctx, next) =>
+app.Use(async (HttpContext ctx, RequestDelegate next) =>
 {
     var path = ctx.Request.Path.Value ?? "/";
     var method = ctx.Request.Method;
 
+    // The slot API can save/restore files on the backend and is never part of
+    // the public surface: the router talks to it directly instead.
+    if (path.StartsWith("/slots"))
+    {
+        ctx.Response.StatusCode = 403;
+        ctx.Response.ContentType = "application/json";
+        await ctx.Response.WriteAsync("{\"error\": \"slot API is not proxied\"}");
+        return;
+    }
+
     if (method == "GET" && path == "/health")
     {
-        // Lock-free: a wedged boot must never take down the status endpoint.
         string p = backend.Profile is null ? "null" : $"\"{backend.Profile}\"";
         var json = $"{{\"status\": \"router-ok\", \"backend\": {p}, \"busy\": {backend.Busy.ToString().ToLowerInvariant()}}}";
         ctx.Response.ContentType = "application/json";
@@ -73,14 +81,14 @@ app.Use(async (ctx, next) =>
         return;
     }
 
-    ctx.Response.StatusCode = 501; // unimplemented method (BaseHTTPRequestHandler default)
+    ctx.Response.StatusCode = 501; // unimplemented method
 });
 
 app.Run();
 
 static async Task<byte[]> ReadBodyAsync(HttpRequest request)
 {
-    if (request.ContentLength is { v: <= 0 }) return Array.Empty<byte>();
+    if (request.ContentLength is not > 0) return Array.Empty<byte>();
     var ms = new MemoryStream();
     var buf = new byte[8192];
     int n;
@@ -139,6 +147,17 @@ static async Task RelayAsync(HttpContext ctx, string method, string path,
     }
     try
     {
+        // Gate only chat/messages POST: an arrival may be held while another
+        // slot prefills. Parsing is best effort; a bad body must not fail it.
+        if (retryable && body is { Length: > 0 })
+        {
+            try
+            {
+                if (JsonNode.Parse(Encoding.UTF8.GetString(body)) is JsonObject decoded)
+                    await bm.AdmitPrefillAsync(decoded, body, profile);
+            }
+            catch { }
+        }
         await ForwardAsync(ctx, method, path, body, retryable, fwd);
     }
     catch (Exception)
@@ -165,11 +184,11 @@ static async Task ForwardAsync(HttpContext ctx, string method, string path,
 
     for (int attempt = 0; attempt <= maxRetries; attempt++)
     {
-        var req = new HttpRequestMessage(method, path);
+        var req = new HttpRequestMessage(new HttpMethod(method), path);
         foreach (var header in ctx.Request.Headers)
         {
             if (hop.Contains(header.Key.ToLowerInvariant())) continue;
-            foreach (var v in header) req.Headers.Add(header.Key, v);
+            foreach (var v in header.Value) req.Headers.Add(header.Key, v);
         }
         if (body is { Length: > 0 })
         {
@@ -181,7 +200,7 @@ static async Task ForwardAsync(HttpContext ctx, string method, string path,
         HttpResponseMessage? resp;
         try
         {
-            resp = await fwd.SendAsync(req, HttpCompletionOption.ResponseHeadersOnly);
+            resp = await fwd.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
         }
         catch
         {
@@ -191,14 +210,14 @@ static async Task ForwardAsync(HttpContext ctx, string method, string path,
             return;
         }
 
-        if (resp.StatusCode == 200)
+        if ((int)resp.StatusCode == 200)
         {
             await StreamToClientAsync(ctx, resp);
             return;
         }
 
         byte[] errBody = await ReadUpToAsync(resp.Content, 65536);
-        bool statusRetry = resp.StatusCode == 429 || resp.StatusCode == 503;
+        bool statusRetry = (int)resp.StatusCode == 429 || (int)resp.StatusCode == 503;
         bool markerHit = HasRetryableMarker(errBody);
         if (retryable && attempt < maxRetries && (statusRetry || markerHit))
         {
@@ -207,11 +226,11 @@ static async Task ForwardAsync(HttpContext ctx, string method, string path,
             continue;
         }
 
-        string ctype = resp.Headers.TryGetValues(new[] { "Content-Type" }, out var ct) ? ct[0] : "application/octet-stream";
+        string ctype = resp.Headers.TryGetValues("Content-Type", out var ct) ? ct.First() : "application/octet-stream";
         ctx.Response.StatusCode = (int)resp.StatusCode;
         ctx.Response.ContentType = ctype;
-        ctx.Response.Headers.Add("Content-Length", errBody.Length.ToString());
-        await ctx.Response.WriteAsync(errBody);
+        ctx.Response.Headers["Content-Length"] = errBody.Length.ToString();
+        await ctx.Response.Body.WriteAsync(errBody, 0, errBody.Length);
         return;
     }
 
@@ -222,11 +241,12 @@ static async Task ForwardAsync(HttpContext ctx, string method, string path,
 
 static async Task StreamToClientAsync(HttpContext ctx, HttpResponseMessage resp)
 {
-    var contentType = resp.Headers.ContentMediaType?.MediaType ?? "application/octet-stream";
+    var contentType = resp.Content?.Headers.ContentType?.MediaType ?? "application/octet-stream";
     ctx.Response.ContentType = contentType;
     bool isSse = contentType == "text/event-stream";
-    if (!isSse && resp.Headers.TryGetValues(new[] { "Content-Length" }, out var len) && len.Length > 0)
-        ctx.Response.Headers.Add("Content-Length", len[0]);
+    if (!isSse && resp.Content is not null
+        && resp.Content.Headers.TryGetValues("Content-Length", out var len))
+        ctx.Response.Headers["Content-Length"] = len.First();
 
     var stream = await resp.Content!.ReadAsStreamAsync();
     if (isSse)
@@ -235,7 +255,7 @@ static async Task StreamToClientAsync(HttpContext ctx, HttpResponseMessage resp)
         string? line;
         while ((line = await reader.ReadLineAsync()) is not null)
         {
-            try { await ctx.Response.WriteAsync(line + "\n"); await ctx.Response.FlushAsync(); }
+            try { await ctx.Response.WriteAsync(line + "\n"); await ctx.Response.Body.FlushAsync(); }
             catch { return; }
         }
     }
@@ -245,7 +265,7 @@ static async Task StreamToClientAsync(HttpContext ctx, HttpResponseMessage resp)
         int n;
         while ((n = await stream.ReadAsync(buf, 0, buf.Length)) > 0)
         {
-            try { await ctx.Response.WriteAsync(buf, 0, n); await ctx.Response.FlushAsync(); }
+            try { await ctx.Response.Body.WriteAsync(buf, 0, n); await ctx.Response.Body.FlushAsync(); }
             catch { return; }
         }
     }
@@ -271,8 +291,7 @@ static async Task<byte[]> ReadUpToAsync(HttpContent? content, int max)
 static bool HasRetryableMarker(byte[] errBody)
 {
     if (errBody.Length == 0) return false;
-    const string[] markers =
-    { "expired", "admission", "overloaded", "busy", "try again", "queue", "unavailable" };
+    string[] markers = { "expired", "admission", "overloaded", "busy", "try again", "queue", "unavailable" };
     string s = Encoding.UTF8.GetString(errBody).ToLowerInvariant();
     foreach (var m in markers)
         if (s.Contains(m))

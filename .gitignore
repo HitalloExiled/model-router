@@ -2,3 +2,7 @@ models/
 *.log
 __pycache__/
 slot-cache/
+bin/
+obj/
+
+.work/

@@ -18,6 +18,9 @@ var backend = new BackendManager();
 builder.Services.AddSingleton(backend);
 var app = builder.Build();
 
+// Mirror python __main__: bind 127.0.0.1:ROUTER_PORT (not ASP.NET's default).
+app.Urls.Add($"http://127.0.0.1:{BackendManager.RouterPort}");
+
 // Long timeout for the forward leg (python http.client timeout=3600).
 var fwd = new HttpClient { Timeout = TimeSpan.FromHours(1) };
 fwd.BaseAddress = new Uri($"http://127.0.0.1:{BackendManager.BackendPort}");

@@ -18,6 +18,8 @@ set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 parent="$(cd -- "$root/.." && pwd)"
+# The router is the .NET 10 AOT port (single-file ELF).
+router_bin="${MODEL_ROUTER_BIN:-$root/bin/Release/net10.0/linux-x64/publish/model-router}"
 
 stack() {
   if [[ -d "$root/$1" ]]; then printf '%s' "$root/$1"
@@ -76,4 +78,9 @@ printf 'router:  http://127.0.0.1:%s (backend :%s, idle %ss)\n' \
 printf 'logs:    this terminal; backend boot log: ~/.local/share/ninfer/ninfer-backend-boot.log\n'
 printf 'stop:    Ctrl-C\n\n'
 
-exec python3 "$root/model-router.py"
+if [[ ! -x "$router_bin" ]]; then
+  printf 'error: .NET router not built: %s\n' "$router_bin" >&2
+  printf '       Build it with: %s/scripts/build-router.sh\n' "$root" >&2
+  exit 1
+fi
+exec "$router_bin"

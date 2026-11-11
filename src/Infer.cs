@@ -1,52 +1,18 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-
 namespace ModelRouter;
 
 // Pure profile-inference from a running backend's argv (llama --alias /
-// ninfer --max-context / shape heuristics). Mirrors python infer_profile.
+// shape heuristics). Mirrors python infer_profile. NInfer was dropped from
+// main, so no --max-context tier lives here anymore.
 public static class Infer
 {
-    // ninfer --max-context <n> -> tier.
-    private static readonly Dictionary<string, string> ContextWindows = new()
-    {
-        ["65536"] = "c1",
-        ["131072"] = "balanced",
-        ["196608"] = "max",
-        ["262144"] = "ultra",
-        ["32768"] = "vision",
-    };
-
     public static string? InferProfile(string? args)
     {
         if (string.IsNullOrWhiteSpace(args))
             return null;
-        string[] toks = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        string[] toks = args.Split(' ', System.StringSplitOptions.RemoveEmptyEntries);
 
-        // ninfer-serve tier: --max-context <n> (space or '=' form).
-        string? win = null;
-        for (int i = 0; i < toks.Length; i++)
-        {
-            string t = toks[i];
-            if (t.StartsWith("--max-context"))
-            {
-                if (t.Contains("="))
-                {
-                    int eq = t.IndexOf('=');
-                    win = t[(eq + 1)..];
-                }
-                else if (i + 1 < toks.Length)
-                {
-                    win = toks[i + 1];
-                }
-                break;
-            }
-        }
-        if (win is not null)
-            return ContextWindows.TryGetValue(win, out string tier) ? tier : null;
-
-        // llama.cpp: routing name rides on --alias.
+        // llama.cpp: the routing name rides on --alias (its entrypoint, not an
+        // arg, is what runs llama-server).
         for (int i = 0; i < toks.Length; i++)
         {
             string t = toks[i];
@@ -71,10 +37,10 @@ public static class Infer
             if (args.Contains("--parallel 5"))
                 return "bonsai-penta128";
             if (args.Contains("--parallel 3"))
-                return (args.Contains("-c 614400") || args.Contains("--ctx-size 614400"))
+                return args.Contains("-c 614400") || args.Contains("--ctx-size 614400")
                     ? "bonsai-trio200" : "bonsai-trio256";
             if (args.Contains("--parallel 2"))
-                return (args.Contains("-c 524288") || args.Contains("--ctx-size 524288"))
+                return args.Contains("-c 524288") || args.Contains("--ctx-size 524288")
                     ? "bonsai-duo256" : "bonsai-duo128";
             if (args.Contains("mmproj"))
                 return "bonsai-vision";
@@ -82,7 +48,7 @@ public static class Infer
         }
 
         if (args.Contains("--parallel 8"))
-            return args.Contains("Ternary-Bonsai") ? "bonsai-octo64" : "gguf-quad";
+            return "gguf-quad";
         if (args.Contains("--parallel 4"))
             return "gguf-quad";
         if (args.Contains("--parallel 2"))

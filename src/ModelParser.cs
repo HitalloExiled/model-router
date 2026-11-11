@@ -4,12 +4,13 @@ namespace ModelRouter;
 
 public sealed class ModelParser
 {
-    private static readonly string[] EffortSuffixes =
+    // Order matters: "-xhigh" must be tested before "-high".
+    private static readonly string[] effortSuffixes =
     [
         "-xhigh", "-high", "-medium", "-low", "-none", "-minimal",
     ];
 
-    private static readonly string[] BonsaiTiers =
+    private static readonly string[] bonsaiTiers =
     [
         "trio256", "trio200", "duo256", "hexa128", "penta128",
         "octo64", "quad128", "duo128", "vision", "max",
@@ -21,7 +22,7 @@ public sealed class ModelParser
     {
         string rest = model ?? "";
         string? effort = null;
-        foreach (var suffix in EffortSuffixes)
+        foreach (var suffix in effortSuffixes)
         {
             if (rest.EndsWith(suffix))
             {
@@ -33,7 +34,9 @@ public sealed class ModelParser
 
         if (rest.Contains("bonsai"))
         {
-            foreach (var tier in BonsaiTiers)
+            // Match the tier word, not the full id: the catalog uses
+            // bonsai-2-27b-<tier>.
+            foreach (var tier in bonsaiTiers)
             {
                 if (rest.Contains(tier))
                     return new Result($"bonsai-{tier}", effort);
@@ -42,8 +45,6 @@ public sealed class ModelParser
         }
         if (rest.Contains("gguf-vision"))
             return new Result("gguf-vision", effort);
-        if (rest.Contains("vision") || rest.Contains("35b"))
-            return new Result("vision", effort);
         if (rest.Contains("gguf-speed"))
             return new Result("gguf-speed", effort);
         if (rest.Contains("gguf-duo128"))
@@ -52,18 +53,15 @@ public sealed class ModelParser
             return new Result("gguf-duo", effort);
         if (rest.Contains("gguf-quad"))
             return new Result("gguf-quad", effort);
-        if (rest.Contains("gguf-single192"))
-            return new Result("gguf-single192", effort);
+        if (rest.Contains("gguf-single200"))
+            return new Result("gguf-single200", effort);
         if (rest.Contains("gguf-max"))
             return new Result("gguf-max", effort);
         if (rest.Contains("gguf-range") || rest.Contains("gguf"))
             return new Result("gguf-range", effort);
-        if (rest.StartsWith("qwen3.8-27b-max") || rest.Contains("192k"))
-            return new Result("max", effort);
-        if (rest.Contains("256k"))
-            return new Result("ultra", effort);
-        if (rest.Contains("64k"))
-            return new Result("c1", effort);
-        return new Result("balanced", effort);
+        // Unknown names land on the general-purpose Qwen tier: the server
+        // accepts arbitrary model strings, so routing them anywhere else would
+        // silently pick the wrong weights.
+        return new Result("gguf-range", effort);
     }
 }

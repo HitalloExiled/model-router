@@ -3,3 +3,5 @@ models/
 __pycache__/
 bin/
 obj/
+
+.work/

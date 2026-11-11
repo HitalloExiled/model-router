@@ -15,4 +15,9 @@
     <MinifyInRelease>true</MinifyInRelease>
   </PropertyGroup>
 
+  <!-- The A/B harness is a separate project; keep it out of the router build. -->
+  <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+  </ItemGroup>
+
 </Project>

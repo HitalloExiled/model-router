@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <InvariantGlobalization>true</InvariantGlobalization>
     <IsTrustedPlatform>true</IsTrustedPlatform>
     <PublishAot>true</PublishAot>

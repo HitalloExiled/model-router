@@ -14,10 +14,6 @@
 # MODEL_ROUTER_MAIN_DIR overrides it (e.g. a worktree with no submodules).
 set -euo pipefail
 
-# Machine-local overrides (models/slot paths) live outside the repo.
-# shellcheck source=lib/env.sh
-. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/env.sh"
-
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 MAIN_DIR="${MODEL_ROUTER_MAIN_DIR:-$ROOT_DIR}"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -70,7 +66,6 @@ Environment=MODEL_ROUTER_IDLE_SEC=${IDLE_SEC}
 Environment=MODEL_ROUTER_DIR=${MAIN_DIR}
 Environment=MODEL_ROUTER_LLAMA_SERVE_SH=${MAIN_DIR}/stacks/gguf-stack/serve-llama.sh
 Environment=MODEL_ROUTER_BONSAI_SERVE_SH=${MAIN_DIR}/stacks/bonsai-stack/serve-bonsai.sh
-EnvironmentFile=-%h/.config/model-router/env
 Environment=MODEL_ROUTER_BONSAI_IMAGE=${BONSAI_IMAGE}
 Environment=DOTNET_ROOT=/usr/lib64/dotnet
 Restart=on-failure

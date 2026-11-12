@@ -15,7 +15,7 @@
 #
 # Disk needed for `all`: ~31 GB. MODEL_ROUTER_GGUF_DIR / MODEL_ROUTER_BONSAI_DIR
 # override a stack individually (the names the serve scripts read); on a machine
-# that keeps them elsewhere they come from ~/.config/model-router/env.
+# that keeps them elsewhere they come from the gitignored .env at the repo root.
 set -euo pipefail
 
 # Machine-local overrides (models/slot paths) live outside the repo.

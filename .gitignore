@@ -3,3 +3,4 @@ models/
 bin/
 obj/
 slot-cache/
+.env

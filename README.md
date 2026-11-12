@@ -50,8 +50,9 @@ Model artifacts and the slot cache (warm KV state, several GB) default to the
 repo: the stack launchers read `<repo>/stacks/<stack>/models` and the router
 keeps slots in `<repo>/slot-cache` (mounted into the backend at `/slot-cache`).
 
-A machine that stores them elsewhere (e.g. another drive) keeps the paths
-outside the repo in `~/.config/model-router/env`:
+A machine that stores them elsewhere (e.g. another drive) puts the paths in
+`~/.config/environment.d/model-router.conf`; the systemd user manager injects
+them into the service (no unit edit), after a `systemctl --user daemon-reload`:
 
 ```
 MODEL_ROUTER_GGUF_DIR=/path/to/gguf
@@ -59,11 +60,10 @@ MODEL_ROUTER_BONSAI_DIR=/path/to/bonsai
 MODEL_ROUTER_SLOT_DIR=/path/to/slot-cache
 ```
 
-The scripts load it through `scripts/lib/env.sh` (`MODEL_ROUTER_ENV_FILE`
-overrides the path) and the unit reads it with
-`EnvironmentFile=-%h/.config/model-router/env`. Anything already exported wins
-over the file. Keeping these paths out of the repo also means a submodule
-`deinit`/clone cannot destroy them.
+Shells do not inherit `environment.d`, so the scripts read a gitignored `.env`
+at the repo root when it exists (a symlink to that same file keeps a single
+source) through `scripts/lib/env.sh`; `MODEL_ROUTER_ENV_FILE` overrides the
+path and anything already exported wins.
 
 The Python implementation this port replaced is kept only in history
 (`backup/main-python`).

@@ -210,9 +210,6 @@ WorkingDirectory=${ROOT_DIR}
 ExecStart=${ROUTER_BIN}
 Environment=MODEL_ROUTER_LLAMA_SERVE_SH=${GGUF_STACK}/serve-llama.sh
 Environment=MODEL_ROUTER_BONSAI_SERVE_SH=${BONSAI_STACK}/serve-bonsai.sh
-Environment=MODEL_ROUTER_GGUF_DIR=${GGUF_STACK}/models
-Environment=MODEL_ROUTER_BONSAI_DIR=${BONSAI_STACK}/models
-EnvironmentFile=-%h/.config/model-router/env
 Environment=MODEL_ROUTER_BONSAI_IMAGE=${BONSAI_IMAGE}
 Environment=MODEL_ROUTER_PORT=${ROUTER_PORT}
 Environment=MODEL_ROUTER_BACKEND_PORT=${BACKEND_PORT}

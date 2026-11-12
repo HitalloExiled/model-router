@@ -40,7 +40,7 @@ MODEL_ROUTER="${ROOT_DIR}"
 # model-router.py; MODEL_ROUTER_BIN overrides the binary path.
 ROUTER_BIN="${MODEL_ROUTER_BIN:-${ROOT_DIR}/bin/Release/net10.0/linux-x64/publish/model-router}"
 
-BONSAI_IMAGE="${NINFER_BONSAI_IMAGE:-bonsai-llama-4090:sm89}"
+BONSAI_IMAGE="${MODEL_ROUTER_BONSAI_IMAGE:-bonsai-llama-4090:sm89}"
 
 ROUTER_PORT="${MODEL_ROUTER_PORT:-18089}"
 BACKEND_PORT="${MODEL_ROUTER_BACKEND_PORT:-8080}"
@@ -122,7 +122,7 @@ log "docker daemon ok; GPU visible"
 # ---------------------------------------------------------------------------
 log "Ensuring docker images..."
 
-LLAMA_IMAGE="${NINFER_LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda-b11854}"
+LLAMA_IMAGE="${MODEL_ROUTER_LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda-b11854}"
 
 if ! docker image inspect "${LLAMA_IMAGE}" >/dev/null 2>&1; then
   log "Pulling ${LLAMA_IMAGE} (first time, ~7GB)..."
@@ -204,9 +204,9 @@ WorkingDirectory=${ROOT_DIR}
 ExecStart=${ROUTER_BIN}
 Environment=MODEL_ROUTER_LLAMA_SERVE_SH=${GGUF_STACK}/serve-llama.sh
 Environment=MODEL_ROUTER_BONSAI_SERVE_SH=${BONSAI_STACK}/serve-bonsai.sh
-Environment=NINFER_GGUF_DIR=${GGUF_STACK}/models
-Environment=NINFER_BONSAI_DIR=${BONSAI_STACK}/models
-Environment=NINFER_BONSAI_IMAGE=${BONSAI_IMAGE}
+Environment=MODEL_ROUTER_GGUF_DIR=${GGUF_STACK}/models
+Environment=MODEL_ROUTER_BONSAI_DIR=${BONSAI_STACK}/models
+Environment=MODEL_ROUTER_BONSAI_IMAGE=${BONSAI_IMAGE}
 Environment=MODEL_ROUTER_PORT=${ROUTER_PORT}
 Environment=MODEL_ROUTER_BACKEND_PORT=${BACKEND_PORT}
 Environment=MODEL_ROUTER_IDLE_SEC=${IDLE_SEC}

@@ -7,16 +7,14 @@
 # with curl -C -, so re-running after an interruption is safe.
 #
 # Usage:
-#   scripts/download-models.sh [ninfer|ninfer-vision|gguf|bonsai|all]
+#   scripts/download-models.sh [gguf|bonsai|all]
 #
-#   ninfer        qwen3_8_27b.ninfer            (~17 GB)
-#   ninfer-vision qwen3_6_35b_a3b.ninfer        (~21 GB, optional 35B vision)
 #   gguf          IQ3_S base + MTP + mmproj      (~24 GB)
 #   bonsai        Bonsai 2 27B PTQ1_0 + mmproj   (~6.2 GB, ternary)
-#   all           ninfer + gguf + bonsai (default)
+#   all           gguf + bonsai (default)
 #
-# Disk needed for `all`: ~48 GB. Override the destination of a stack with
-# NINFER_MODEL_DIR / NINFER_GGUF_DIR / NINFER_BONSAI_DIR.
+# Disk needed for `all`: ~31 GB. Override the destination of a stack with
+# MODEL_ROUTER_GGUF_DIR / MODEL_ROUTER_BONSAI_DIR (the names the serve scripts read).
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,9 +25,8 @@ stack() {
   else printf '%s' "$parent/$1"; fi
 }
 
-ninfer_dir="${NINFER_MODEL_DIR:-$(stack ninfer-stack)/models}"
-gguf_dir="${NINFER_GGUF_DIR:-$(stack gguf-stack)/models}"
-bonsai_dir="${NINFER_BONSAI_DIR:-$(stack bonsai-stack)/models}"
+gguf_dir="${MODEL_ROUTER_GGUF_DIR:-$(stack gguf-stack)/models}"
+bonsai_dir="${MODEL_ROUTER_BONSAI_DIR:-$(stack bonsai-stack)/models}"
 
 fetch() {  # fetch <url> <dest> <label>
   local url="$1" dest="$2" label="$3"
@@ -40,28 +37,6 @@ fetch() {  # fetch <url> <dest> <label>
     exit 1
   fi
   printf '    ok: %s\n' "$dest"
-}
-
-get_ninfer() {
-  local script
-  script="$(stack ninfer-stack)/download-qwen38.sh"
-  if [[ -f "$script" ]]; then
-    NINFER_MODEL_DIR="$ninfer_dir" bash "$script"
-  else
-    fetch "https://huggingface.co/neroued/Qwen3.8-27B-NInfer/resolve/main/qwen3_8_27b.ninfer" \
-      "$ninfer_dir/qwen3_8_27b.ninfer" "Qwen3.8-27B NInfer (~17 GB)"
-  fi
-}
-
-get_ninfer_vision() {
-  local script
-  script="$(stack ninfer-stack)/download-qwen36-35b-vision.sh"
-  if [[ -f "$script" ]]; then
-    NINFER_MODEL_DIR="$ninfer_dir" bash "$script"
-  else
-    fetch "https://huggingface.co/neroued/Qwen3.6-35B-A3B-NInfer/resolve/c8b8c1c0df4c74df3c190c6aa3a7f24dc614721c/qwen3_6_35b_a3b.ninfer" \
-      "$ninfer_dir/qwen3_6_35b_a3b.ninfer" "Qwen3.6-35B-A3B NInfer vision (~21 GB)"
-  fi
 }
 
 get_gguf() {
@@ -89,15 +64,13 @@ get_bonsai() {
 
 what="${1:-all}"
 case "$what" in
-  ninfer)        get_ninfer ;;
-  ninfer-vision) get_ninfer_vision ;;
   gguf)          get_gguf ;;
   bonsai)        get_bonsai ;;
-  all)           get_ninfer; get_gguf; get_bonsai ;;
-  -h|--help)     sed -n '2,19p' "$0"; exit 0 ;;
-  *) printf 'Unknown target: %s (want ninfer|ninfer-vision|gguf|bonsai|all)\n' "$what" >&2
+  all)           get_gguf; get_bonsai ;;
+  -h|--help)     sed -n '2,17p' "$0"; exit 0 ;;
+  *) printf 'Unknown target: %s (want gguf|bonsai|all)\n' "$what" >&2
      exit 1 ;;
 esac
 
 printf '\nArtifacts:\n'
-du -sh -- "$ninfer_dir" "$gguf_dir" "$bonsai_dir" 2>/dev/null || true
+du -sh -- "$gguf_dir" "$bonsai_dir" 2>/dev/null || true

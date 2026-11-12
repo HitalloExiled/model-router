@@ -54,9 +54,9 @@ public sealed class BackendManager : IAsyncDisposable
         "MODEL_ROUTER_BONSAI_SERVE_SH")
         ?? Path.Combine(ResolveStackDir("bonsai-stack"), "serve-bonsai.sh");
     public static readonly string LlamaImage = Environment.GetEnvironmentVariable(
-        "NINFER_LLAMA_IMAGE") ?? "ghcr.io/ggml-org/llama.cpp:server-cuda-b12110";
+        "MODEL_ROUTER_LLAMA_IMAGE") ?? "ghcr.io/ggml-org/llama.cpp:server-cuda-b12110";
     public static readonly string BonsaiImage = Environment.GetEnvironmentVariable(
-        "NINFER_BONSAI_IMAGE") ?? "bonsai-llama-4090:sm89";
+        "MODEL_ROUTER_BONSAI_IMAGE") ?? "bonsai-llama-4090:sm89";
 
     public static readonly int RouterPort =
         int.Parse(Environment.GetEnvironmentVariable("MODEL_ROUTER_PORT") ?? "18089");
@@ -238,7 +238,7 @@ public sealed class BackendManager : IAsyncDisposable
         foreach (var arg in argv.Skip(1)) psi.ArgumentList.Add(arg);
         // Both serve scripts mount this dir and pass --slot-save-path, so a
         // warm slot survives the restart.
-        psi.Environment["NINFER_SLOT_CACHE_DIR"] = SlotDir;
+        psi.Environment["MODEL_ROUTER_SLOT_CACHE_DIR"] = SlotDir;
 
         var proc = new Process { StartInfo = psi };
 

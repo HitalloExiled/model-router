@@ -22,6 +22,7 @@ probes/                  .NET file-based apps (effort, cache-reuse, parallel,
 ```
 make build      # dotnet build (net11)
 make test       # xUnit v3 unit tests
+make analyze    # roslynator analyze on ModelRouter.slnx
 make publish    # AOT single-file ELF (src/ModelRouter/bin/Release/net11.0/.../publish/model-router)
 make setup      # install/refresh model-router.net.service (:18090)
 make run        # foreground
@@ -30,7 +31,13 @@ make ab         # Python differential test (needs ../model-router)
 ```
 
 `DOTNET ?= /usr/lib64/dotnet/dotnet` (the .NET 11 SDK). Override with
-`make DOTNET=...`.
+`make DOTNET=...`. The Makefile exports `DOTNET_ROOT` derived from `DOTNET`:
+`roslynator` discovers MSBuild through `DOTNET_ROOT`, and pointing it at an
+older SDK (e.g. `~/.dotnet` with 10.0.203) makes every reference fail to
+resolve, which surfaces as thousands of bogus CS0518/CS0103 diagnostics.
+Use `make analyze`, or run
+`DOTNET_ROOT=/usr/lib64/dotnet dotnet roslynator analyze ModelRouter.slnx`
+directly.
 
 ## Environment
 

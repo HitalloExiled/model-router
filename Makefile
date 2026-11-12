@@ -1,10 +1,16 @@
 DOTNET ?= /usr/lib64/dotnet/dotnet
+# Tools that host MSBuild (roslynator) enumerate SDKs under DOTNET_ROOT, not
+# under DOTNET: with DOTNET_ROOT on an older SDK they load net11 assets with
+# SDK 10 and fail every reference. Keep it aligned with the SDK in use.
+DOTNET_ROOT := $(patsubst %/,%,$(dir $(DOTNET)))
 PROJECT := src/ModelRouter/ModelRouter.csproj
 TESTS := src/ModelRouter.Tests/ModelRouter.Tests.csproj
+SOLUTION := ModelRouter.slnx
 
 export DOTNET
+export DOTNET_ROOT
 
-.PHONY: all build publish test ab setup run e2e clean
+.PHONY: all build publish test ab analyze setup run e2e clean
 
 all: build
 
@@ -19,6 +25,9 @@ test:
 
 ab:
 	python3 tests/ab/ab.py
+
+analyze:
+	$(DOTNET) roslynator analyze $(SOLUTION)
 
 setup:
 	bash scripts/setup-service.sh

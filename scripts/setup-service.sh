@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# setup.sh — install/refresh the .NET router systemd user service.
+# scripts/setup-service.sh — install/refresh the .NET router systemd user service.
 #
 #   model-router.net.service  ->  .NET router on :18090 (AOT binary)
 #
 # Usage:
-#   ./setup.sh [--print] [--no-start] [--port N] [--backend-port N] [--idle SEC]
+#   scripts/setup-service.sh [--print] [--no-start] [--port N] [--backend-port N] [--idle SEC]
 #
 # --print        print the unit and exit (do not touch systemd)
 # --no-start     write the unit and enable it, but do not start/restart now
@@ -14,14 +14,14 @@
 # MODEL_ROUTER_MAIN_DIR overrides it.
 set -euo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 MAIN_DIR="${MODEL_ROUTER_MAIN_DIR:-$(cd -- "${ROOT_DIR}/../model-router" 2>/dev/null && pwd || echo "$ROOT_DIR")}"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT_NAME="model-router.net.service"
 UNIT_FILE="$UNIT_DIR/$UNIT_NAME"
-DOTNET="${DOTNET:-/home/rafael.franca/.dotnet/dotnet}"
-AOT_BIN="${ROOT_DIR}/bin/Release/net10.0/linux-x64/publish/model-router"
-MANAGED_DLL="${ROOT_DIR}/bin/Release/net10.0/model-router.dll"
+DOTNET="${DOTNET:-/usr/lib64/dotnet/dotnet}"
+AOT_BIN="${ROOT_DIR}/src/ModelRouter/bin/Release/net11.0/linux-x64/publish/model-router"
+MANAGED_DLL="${ROOT_DIR}/src/ModelRouter/bin/Release/net11.0/model-router.dll"
 
 PORT="${MODEL_ROUTER_PORT:-18090}"
 BACKEND_PORT="${MODEL_ROUTER_BACKEND_PORT:-8080}"
@@ -69,7 +69,7 @@ Environment=MODEL_ROUTER_BONSAI_SERVE_SH=${MAIN_DIR}/bonsai-stack/serve-bonsai.s
 Environment=MODEL_ROUTER_GGUF_DIR=${MAIN_DIR}/gguf-stack/models
 Environment=MODEL_ROUTER_BONSAI_DIR=${MAIN_DIR}/bonsai-stack/models
 Environment=MODEL_ROUTER_BONSAI_IMAGE=${BONSAI_IMAGE}
-Environment=DOTNET_ROOT=/home/rafael.franca/.dotnet
+Environment=DOTNET_ROOT=/usr/lib64/dotnet
 Restart=on-failure
 RestartSec=5
 

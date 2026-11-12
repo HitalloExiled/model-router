@@ -18,12 +18,15 @@ set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 parent="$(cd -- "$root/.." && pwd)"
-# The router is the .NET 10 AOT port (single-file ELF).
-router_bin="${MODEL_ROUTER_BIN:-$root/bin/Release/net10.0/linux-x64/publish/model-router}"
+# The router is the .NET 11 AOT port (single-file ELF).
+router_bin="${MODEL_ROUTER_BIN:-$root/src/ModelRouter/bin/Release/net11.0/linux-x64/publish/model-router}"
 
 stack() {
-  if [[ -d "$root/$1" ]]; then printf '%s' "$root/$1"
-  else printf '%s' "$parent/$1"; fi
+  local d
+  for d in "$root/stacks/$1" "$root/$1" "$parent/$1" "$parent/model-router/$1"; do
+    if [[ -d "$d" ]] && [[ -n "$(ls -A "$d" 2>/dev/null)" ]]; then printf '%s' "$d"; return; fi
+  done
+  printf '%s' "$parent/$1"
 }
 
 port="${MODEL_ROUTER_PORT:-18089}"
@@ -62,8 +65,8 @@ if command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
   printf 'warning: docker is not reachable; the router will start but cannot boot a backend\n' >&2
 fi
 
-export LLAMA_SERVE_SH="${LLAMA_SERVE_SH:-$(stack gguf-stack)/serve-llama.sh}"
-export BONSAI_SERVE_SH="${BONSAI_SERVE_SH:-$(stack bonsai-stack)/serve-bonsai.sh}"
+export MODEL_ROUTER_LLAMA_SERVE_SH="${MODEL_ROUTER_LLAMA_SERVE_SH:-$(stack gguf-stack)/serve-llama.sh}"
+export MODEL_ROUTER_BONSAI_SERVE_SH="${MODEL_ROUTER_BONSAI_SERVE_SH:-$(stack bonsai-stack)/serve-bonsai.sh}"
 export MODEL_ROUTER_GGUF_DIR="${MODEL_ROUTER_GGUF_DIR:-$(stack gguf-stack)/models}"
 export MODEL_ROUTER_BONSAI_DIR="${MODEL_ROUTER_BONSAI_DIR:-$(stack bonsai-stack)/models}"
 export MODEL_ROUTER_BONSAI_IMAGE="${MODEL_ROUTER_BONSAI_IMAGE:-bonsai-llama-4090:sm89}"

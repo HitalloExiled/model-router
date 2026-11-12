@@ -30,19 +30,33 @@ public sealed class BackendManager : IAsyncDisposable
     {
         var fromEnv = Environment.GetEnvironmentVariable("MODEL_ROUTER_DIR");
         if (!string.IsNullOrEmpty(fromEnv)) return fromEnv;
+        // Walk up from the assembly location to the repo root (stacks/ or Makefile).
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (Directory.Exists(Path.Combine(dir.FullName, "stacks"))
+                || File.Exists(Path.Combine(dir.FullName, "Makefile")))
+                return dir.FullName;
+            dir = dir.Parent;
+        }
         return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "Projetos", "My", "model-router");
+            "Projetos", "My", "model-router-dotnet-aot");
     }
 
     public static readonly string RouterDir = ResolveRouterDir();
 
     private static string ResolveStackDir(string name)
     {
-        // Inside the router repo first (submodule), then a sibling checkout
-        // (~/Projetos/My/<name>), mirroring python stack_dir.
-        var inside = Path.Combine(RouterDir, name);
-        if (Directory.Exists(inside)) return inside;
+        // New layout: <RouterDir>/stacks/<name>; fall back to the legacy
+        // <RouterDir>/<name> (e.g. an uninitialized stacks/ in a worktree)
+        // and then a sibling checkout (~/Projetos/My/<name>).
+        var inside = Path.Combine(RouterDir, "stacks", name);
+        if (Directory.Exists(inside) && Directory.EnumerateFileSystemEntries(inside).Any())
+            return inside;
+        var legacy = Path.Combine(RouterDir, name);
+        if (Directory.Exists(legacy) && Directory.EnumerateFileSystemEntries(legacy).Any())
+            return legacy;
         var parent = Path.GetDirectoryName(Path.GetDirectoryName(RouterDir)) ?? RouterDir;
         return Path.Combine(parent, name);
     }

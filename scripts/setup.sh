@@ -8,7 +8,7 @@
 #        ghcr.io/ggml-org/llama.cpp:server-cuda  (pulled from ghcr.io)
 #        bonsai-llama-4090:sm89               (built from bonsai-stack/llama.cpp submodule)
 #   3. Checks model artifacts for both stacks (see scripts/download-models.sh).
-#   4. Installs systemd user unit: model-router.service
+#   4. Installs systemd user unit: model-router.net.service
 #   5. Starts/enables the router so model serving works on demand.
 #   6. Verifies /health and runs each stack's check.sh.
 #
@@ -30,15 +30,18 @@ PARENT_DIR="$(cd -- "${ROOT_DIR}/.." && pwd)"
 
 # Stacks are git submodules (inside ROOT_DIR); fall back to sibling checkouts.
 resolve_stack() {
-  if [[ -d "${ROOT_DIR}/$1" ]]; then printf '%s' "${ROOT_DIR}/$1"
-  else printf '%s' "${PARENT_DIR}/$1"; fi
+  local d
+  for d in "${ROOT_DIR}/stacks/$1" "${ROOT_DIR}/$1" "${PARENT_DIR}/$1" "${PARENT_DIR}/model-router/$1"; do
+    if [[ -d "$d" ]] && [[ -n "$(ls -A "$d" 2>/dev/null)" ]]; then printf '%s' "$d"; return; fi
+  done
+  printf '%s' "${PARENT_DIR}/$1"
 }
 GGUF_STACK="$(resolve_stack gguf-stack)"
 BONSAI_STACK="$(resolve_stack bonsai-stack)"
 MODEL_ROUTER="${ROOT_DIR}"
 # The router is the .NET 10 AOT port (single-file ELF). Older checkouts ran
 # model-router.py; MODEL_ROUTER_BIN overrides the binary path.
-ROUTER_BIN="${MODEL_ROUTER_BIN:-${ROOT_DIR}/bin/Release/net10.0/linux-x64/publish/model-router}"
+ROUTER_BIN="${MODEL_ROUTER_BIN:-${ROOT_DIR}/src/ModelRouter/bin/Release/net11.0/linux-x64/publish/model-router}"
 
 BONSAI_IMAGE="${MODEL_ROUTER_BONSAI_IMAGE:-bonsai-llama-4090:sm89}"
 
@@ -47,7 +50,7 @@ BACKEND_PORT="${MODEL_ROUTER_BACKEND_PORT:-8080}"
 IDLE_SEC="${MODEL_ROUTER_IDLE_SEC:-21600}"
 
 UNIT_DIR="${HOME}/.config/systemd/user"
-UNIT_FILE="${UNIT_DIR}/model-router.service"
+UNIT_FILE="${UNIT_DIR}/model-router.net.service"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -191,7 +194,7 @@ if [[ ! -x "${ROUTER_BIN}" ]]; then
   bash "${SCRIPT_DIR}/build-router.sh"
 fi
 
-log "Installing systemd user unit: model-router.service"
+log "Installing systemd user unit: model-router.net.service"
 mkdir -p "${UNIT_DIR}"
 
 cat > "${UNIT_FILE}" <<UNIT
@@ -218,10 +221,10 @@ WantedBy=default.target
 UNIT
 
 systemctl --user daemon-reload
-systemctl --user enable model-router.service
+systemctl --user enable model-router.net.service
 # restart, not `enable --now`: on a re-run the unit file changed (new env) and
 # an already-active service would keep the old environment.
-systemctl --user restart model-router.service
+systemctl --user restart model-router.net.service
 
 # ---------------------------------------------------------------------------
 # 5. Wait for router to be healthy
@@ -234,7 +237,7 @@ for i in $(seq 1 60); do
   fi
   if [[ "$i" -eq 60 ]]; then
     printf 'error: router did not become healthy in time\n' >&2
-    journalctl --user -u model-router.service --no-pager -n 20 >&2 || true
+    journalctl --user -u model-router.net.service --no-pager -n 20 >&2 || true
     exit 1
   fi
   sleep 2
@@ -255,8 +258,8 @@ log "Setup complete."
 echo
 echo "Router:   http://127.0.0.1:${ROUTER_PORT}/health"
 echo "Backend:  http://127.0.0.1:${BACKEND_PORT}/health"
-echo "Unit:     systemctl --user {start,stop,status} model-router.service"
-echo "Logs:     journalctl --user -u model-router.service -f"
+echo "Unit:     systemctl --user {start,stop,status} model-router.net.service"
+echo "Logs:     journalctl --user -u model-router.net.service -f"
 echo
 echo "Stacks:"
 echo "  gguf-stack:   ${GGUF_STACK}"

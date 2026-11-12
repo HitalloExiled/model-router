@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# scripts/build-router.sh — publish the .NET 10 AOT router (single-file ELF).
+# scripts/build-router.sh — publish the .NET 11 AOT router (single-file ELF).
 #
 # The output is what scripts/setup.sh installs in model-router.service and
 # what scripts/run-router.sh execs:
@@ -14,6 +14,6 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
 dotnet="${DOTNET:-dotnet}"
-"$dotnet" publish -c Release -r linux-x64
+"$dotnet" publish src/ModelRouter/ModelRouter.csproj -c Release -r linux-x64
 
-printf 'built: %s\n' "$root/bin/Release/net10.0/linux-x64/publish/model-router"
+printf 'built: %s\n' "$root/src/ModelRouter/bin/Release/net11.0/linux-x64/publish/model-router"

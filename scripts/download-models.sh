@@ -21,8 +21,11 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 parent="$(cd -- "$root/.." && pwd)"
 
 stack() {
-  if [[ -d "$root/$1" ]]; then printf '%s' "$root/$1"
-  else printf '%s' "$parent/$1"; fi
+  local d
+  for d in "$root/stacks/$1" "$root/$1" "$parent/$1" "$parent/model-router/$1"; do
+    if [[ -d "$d" ]] && [[ -n "$(ls -A "$d" 2>/dev/null)" ]]; then printf '%s' "$d"; return; fi
+  done
+  printf '%s' "$parent/$1"
 }
 
 gguf_dir="${MODEL_ROUTER_GGUF_DIR:-$(stack gguf-stack)/models}"

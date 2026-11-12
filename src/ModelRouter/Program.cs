@@ -1,6 +1,3 @@
-using System;
-using System.Net.Http;
-using Microsoft.Extensions.DependencyInjection;
 using ModelRouter;
 using ModelRouter.Chat;
 using ModelRouter.Configuration;

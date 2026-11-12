@@ -1,0 +1,11 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/ModelRouter/ModelRouter.csproj" />
+    <Project Path="src/ModelRouter.Tests/ModelRouter.Tests.csproj" />
+  </Folder>
+</Solution>

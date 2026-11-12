@@ -191,6 +191,10 @@ static async Task ForwardAsync(HttpContext ctx, string method, string path,
         foreach (var header in ctx.Request.Headers)
         {
             if (hop.Contains(header.Key.ToLowerInvariant())) continue;
+            // Content-* are HttpContent headers; adding them to req.Headers
+            // throws (misused header name). Content-Type is set on the
+            // ByteArrayContent below and Content-Length is derived from it.
+            if (header.Key.StartsWith("Content-", StringComparison.OrdinalIgnoreCase)) continue;
             foreach (var v in header.Value) req.Headers.Add(header.Key, v);
         }
         if (body is { Length: > 0 })

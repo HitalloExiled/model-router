@@ -2,9 +2,9 @@
 #
 # scripts/download-models.sh — fetch every model artifact the stacks serve.
 #
-# Artifacts land in each stack's models/ (the exact paths the launchers expect),
-# so this is the single command to run after a fresh clone. Downloads resume
-# with curl -C -, so re-running after an interruption is safe.
+# Artifacts land outside the repo (MODEL_ROUTER_MODELS_DIR, default
+# ~/Drives/Files/AI/Models), so a clone/deinit/rebase never touches them.
+# Downloads resume with curl -C -, so re-running after an interruption is safe.
 #
 # Usage:
 #   scripts/download-models.sh [gguf|bonsai|all]
@@ -13,8 +13,9 @@
 #   bonsai        Bonsai 2 27B PTQ1_0 + mmproj   (~6.2 GB, ternary)
 #   all           gguf + bonsai (default)
 #
-# Disk needed for `all`: ~31 GB. Override the destination of a stack with
-# MODEL_ROUTER_GGUF_DIR / MODEL_ROUTER_BONSAI_DIR (the names the serve scripts read).
+# Disk needed for `all`: ~31 GB. MODEL_ROUTER_MODELS_DIR sets the root
+# (gguf/ and bonsai/ under it); MODEL_ROUTER_GGUF_DIR / MODEL_ROUTER_BONSAI_DIR
+# override a stack individually (the names the serve scripts read).
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,8 +29,9 @@ stack() {
   printf '%s' "$parent/$1"
 }
 
-gguf_dir="${MODEL_ROUTER_GGUF_DIR:-$(stack gguf-stack)/models}"
-bonsai_dir="${MODEL_ROUTER_BONSAI_DIR:-$(stack bonsai-stack)/models}"
+models_dir="${MODEL_ROUTER_MODELS_DIR:-$HOME/Drives/Files/AI/Models}"
+gguf_dir="${MODEL_ROUTER_GGUF_DIR:-$models_dir/gguf}"
+bonsai_dir="${MODEL_ROUTER_BONSAI_DIR:-$models_dir/bonsai}"
 
 fetch() {  # fetch <url> <dest> <label>
   local url="$1" dest="$2" label="$3"

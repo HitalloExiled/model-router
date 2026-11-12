@@ -46,5 +46,10 @@ The service is configured by `scripts/setup-service.sh`; it points
 `stacks/` are SSH-pinned submodules: `git submodule update --init` before the
 first `make setup` on a fresh clone.
 
+Model artifacts live **outside** the repo: `MODEL_ROUTER_MODELS_DIR`
+(default `~/Drives/Files/AI/Models`, with `gguf/` and `bonsai/` under it) is
+what the service and `scripts/download-models.sh` use. They are never inside
+the submodules, so `git submodule deinit`/clone cannot destroy them.
+
 The Python implementation this port replaced is kept only in history
 (`backup/main-python`).

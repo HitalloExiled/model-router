@@ -19,7 +19,7 @@ Env:
   MODEL_ROUTER_PORT / MODEL_ROUTER_BACKEND_PORT / MODEL_ROUTER_IDLE_SEC
     (default 18089 / 8080 / 21600)
   MODEL_ROUTER_LLAMA_SERVE_SH / MODEL_ROUTER_BONSAI_SERVE_SH (launchers)
-  NINFER_LLAMA_IMAGE / NINFER_BONSAI_IMAGE (shared with the serve scripts)
+  MODEL_ROUTER_LLAMA_IMAGE / MODEL_ROUTER_BONSAI_IMAGE (shared with the serve scripts)
   MODEL_ROUTER_DIGEST=1 / MODEL_ROUTER_DUMP=<dir> (prefix-cache forensics)
   MODEL_ROUTER_PREFILL_GATE=0 (disable the admission gate entirely)
   MODEL_ROUTER_PREFILL_GATE_ENFORCE=0 (diagnose only; phase A is enforced)
@@ -60,10 +60,10 @@ SERVE_BONSAI = os.environ.get(
     os.path.join(stack_dir("bonsai-stack"), "serve-bonsai.sh"))
 # llama.cpp stack (GGUF). Flags live in gguf-stack/serve-llama.sh; the router
 # only selects profile -> argv here. Image names are shared with the serve
-# scripts (which own the NINFER_* env names): the router reads them to
+# scripts (which own the MODEL_ROUTER_* env names): the router reads them to
 # recognize a running container, the scripts to pick the image to run.
 LLAMA_IMAGE = os.environ.get(
-    "NINFER_LLAMA_IMAGE",
+    "MODEL_ROUTER_LLAMA_IMAGE",
     "ghcr.io/ggml-org/llama.cpp:server-cuda-b12110")
 GGUF_FILES = {
     "gguf-speed": "Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
@@ -79,7 +79,7 @@ GGUF_FILES = {
 # cannot run these packs, so this is a THIRD image — still one backend at a
 # time: whichever model is requested wins and the resident one is stopped.
 BONSAI_IMAGE = os.environ.get(
-    "NINFER_BONSAI_IMAGE", "bonsai-llama-4090:sm89")
+    "MODEL_ROUTER_BONSAI_IMAGE", "bonsai-llama-4090:sm89")
 BONSAI_FILES = {
     "bonsai-max": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
     "bonsai-duo256": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
@@ -544,7 +544,7 @@ def start_backend(profile, want_mmproj=False):
     env = dict(os.environ)
     # Both serve scripts mount this dir and pass --slot-save-path /slot-cache
     # so a warm slot can survive the restart (see restore_slot_cache).
-    env["NINFER_SLOT_CACHE_DIR"] = SLOT_DIR
+    env["MODEL_ROUTER_SLOT_CACHE_DIR"] = SLOT_DIR
     log(f"starting profile {profile} want_mmproj={want_mmproj}")
     # Serve output goes to a file, never DEVNULL: a dead launcher must leave
     # evidence (exit code + tail) instead of a silent 7-minute hang.

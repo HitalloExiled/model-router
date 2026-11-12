@@ -14,7 +14,7 @@
 #   all           gguf + bonsai (default)
 #
 # Disk needed for `all`: ~31 GB. Override the destination of a stack with
-# NINFER_GGUF_DIR / NINFER_BONSAI_DIR (the names the serve scripts read).
+# MODEL_ROUTER_GGUF_DIR / MODEL_ROUTER_BONSAI_DIR (the names the serve scripts read).
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -25,8 +25,8 @@ stack() {
   else printf '%s' "$parent/$1"; fi
 }
 
-gguf_dir="${NINFER_GGUF_DIR:-$(stack gguf-stack)/models}"
-bonsai_dir="${NINFER_BONSAI_DIR:-$(stack bonsai-stack)/models}"
+gguf_dir="${MODEL_ROUTER_GGUF_DIR:-$(stack gguf-stack)/models}"
+bonsai_dir="${MODEL_ROUTER_BONSAI_DIR:-$(stack bonsai-stack)/models}"
 
 fetch() {  # fetch <url> <dest> <label>
   local url="$1" dest="$2" label="$3"

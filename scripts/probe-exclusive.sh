@@ -31,7 +31,7 @@ ask() {
 }
 
 count() {
-  docker ps --format '{{.Image}}' | grep -Ec 'llama\.cpp:server-cuda|bonsai-llama-4090|ninfer-4090' || true
+  docker ps --format '{{.Image}}' | grep -Ec 'llama\.cpp:server-cuda|bonsai-llama-4090' || true
 }
 
 rc=0

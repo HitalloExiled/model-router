@@ -1,7 +1,5 @@
 models/
 *.log
-__pycache__/
 bin/
 obj/
-
 slot-cache/

@@ -67,6 +67,8 @@ fi
 
 export MODEL_ROUTER_LLAMA_SERVE_SH="${MODEL_ROUTER_LLAMA_SERVE_SH:-$(stack gguf-stack)/serve-llama.sh}"
 export MODEL_ROUTER_BONSAI_SERVE_SH="${MODEL_ROUTER_BONSAI_SERVE_SH:-$(stack bonsai-stack)/serve-bonsai.sh}"
+# Artifact dirs and image names stay on the MODEL_ROUTER_* names they ship with:
+# the serve scripts in stacks/ read them.
 export MODEL_ROUTER_GGUF_DIR="${MODEL_ROUTER_GGUF_DIR:-$(stack gguf-stack)/models}"
 export MODEL_ROUTER_BONSAI_DIR="${MODEL_ROUTER_BONSAI_DIR:-$(stack bonsai-stack)/models}"
 export MODEL_ROUTER_BONSAI_IMAGE="${MODEL_ROUTER_BONSAI_IMAGE:-bonsai-llama-4090:sm89}"

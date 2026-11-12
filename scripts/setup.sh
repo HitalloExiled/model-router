@@ -19,6 +19,10 @@
 #   - Add user to docker group: sudo usermod -aG docker $USER
 #   - Download model artifacts (~40 GB total): scripts/download-models.sh all
 set -euo pipefail
+
+# Machine-local overrides (models/slot paths) live outside the repo.
+# shellcheck source=lib/env.sh
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/env.sh"
 export LC_ALL=C LC_NUMERIC=C
 
 # ---------------------------------------------------------------------------
@@ -38,10 +42,6 @@ resolve_stack() {
 }
 GGUF_STACK="$(resolve_stack gguf-stack)"
 BONSAI_STACK="$(resolve_stack bonsai-stack)"
-MODELS_DIR="${MODEL_ROUTER_MODELS_DIR:-$HOME/Drives/Files/AI/Models}"
-GGUF_MODELS="${MODEL_ROUTER_GGUF_DIR:-$MODELS_DIR/gguf}"
-BONSAI_MODELS="${MODEL_ROUTER_BONSAI_DIR:-$MODELS_DIR/bonsai}"
-SLOT_DIR="${MODEL_ROUTER_SLOT_DIR:-$HOME/Drives/Files/.tmp/slot-cache}"
 MODEL_ROUTER="${ROOT_DIR}"
 # The router is the .NET 11 AOT port (single-file ELF); MODEL_ROUTER_BIN
 # overrides the binary path.
@@ -210,9 +210,9 @@ WorkingDirectory=${ROOT_DIR}
 ExecStart=${ROUTER_BIN}
 Environment=MODEL_ROUTER_LLAMA_SERVE_SH=${GGUF_STACK}/serve-llama.sh
 Environment=MODEL_ROUTER_BONSAI_SERVE_SH=${BONSAI_STACK}/serve-bonsai.sh
-Environment=MODEL_ROUTER_GGUF_DIR=${GGUF_MODELS}
-Environment=MODEL_ROUTER_BONSAI_DIR=${BONSAI_MODELS}
-Environment=MODEL_ROUTER_SLOT_DIR=${SLOT_DIR}
+Environment=MODEL_ROUTER_GGUF_DIR=${GGUF_STACK}/models
+Environment=MODEL_ROUTER_BONSAI_DIR=${BONSAI_STACK}/models
+EnvironmentFile=-%h/.config/model-router/env
 Environment=MODEL_ROUTER_BONSAI_IMAGE=${BONSAI_IMAGE}
 Environment=MODEL_ROUTER_PORT=${ROUTER_PORT}
 Environment=MODEL_ROUTER_BACKEND_PORT=${BACKEND_PORT}

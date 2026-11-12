@@ -14,10 +14,12 @@
 # MODEL_ROUTER_MAIN_DIR overrides it (e.g. a worktree with no submodules).
 set -euo pipefail
 
+# Machine-local overrides (models/slot paths) live outside the repo.
+# shellcheck source=lib/env.sh
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/env.sh"
+
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 MAIN_DIR="${MODEL_ROUTER_MAIN_DIR:-$ROOT_DIR}"
-MODELS_DIR="${MODEL_ROUTER_MODELS_DIR:-$HOME/Drives/Files/AI/Models}"
-SLOT_DIR="${MODEL_ROUTER_SLOT_DIR:-$HOME/Drives/Files/.tmp/slot-cache}"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT_NAME="model-router.net.service"
 UNIT_FILE="$UNIT_DIR/$UNIT_NAME"
@@ -68,9 +70,7 @@ Environment=MODEL_ROUTER_IDLE_SEC=${IDLE_SEC}
 Environment=MODEL_ROUTER_DIR=${MAIN_DIR}
 Environment=MODEL_ROUTER_LLAMA_SERVE_SH=${MAIN_DIR}/stacks/gguf-stack/serve-llama.sh
 Environment=MODEL_ROUTER_BONSAI_SERVE_SH=${MAIN_DIR}/stacks/bonsai-stack/serve-bonsai.sh
-Environment=MODEL_ROUTER_GGUF_DIR=${MODEL_ROUTER_GGUF_DIR:-${MODELS_DIR}/gguf}
-Environment=MODEL_ROUTER_BONSAI_DIR=${MODEL_ROUTER_BONSAI_DIR:-${MODELS_DIR}/bonsai}
-Environment=MODEL_ROUTER_SLOT_DIR=${SLOT_DIR}
+EnvironmentFile=-%h/.config/model-router/env
 Environment=MODEL_ROUTER_BONSAI_IMAGE=${BONSAI_IMAGE}
 Environment=DOTNET_ROOT=/usr/lib64/dotnet
 Restart=on-failure

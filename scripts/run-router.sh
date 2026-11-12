@@ -16,6 +16,10 @@
 # containers, so use it for debugging, not side by side with the unit.
 set -euo pipefail
 
+# Machine-local overrides (models/slot paths) live outside the repo.
+# shellcheck source=lib/env.sh
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/env.sh"
+
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 parent="$(cd -- "$root/.." && pwd)"
 # The router is the .NET 11 AOT port (single-file ELF).
@@ -69,11 +73,8 @@ export MODEL_ROUTER_LLAMA_SERVE_SH="${MODEL_ROUTER_LLAMA_SERVE_SH:-$(stack gguf-
 export MODEL_ROUTER_BONSAI_SERVE_SH="${MODEL_ROUTER_BONSAI_SERVE_SH:-$(stack bonsai-stack)/serve-bonsai.sh}"
 # Artifact dirs and image names stay on the MODEL_ROUTER_* names they ship with:
 # the serve scripts in stacks/ read them.
-models_dir="${MODEL_ROUTER_MODELS_DIR:-$HOME/Drives/Files/AI/Models}"
-export MODEL_ROUTER_GGUF_DIR="${MODEL_ROUTER_GGUF_DIR:-$models_dir/gguf}"
-export MODEL_ROUTER_BONSAI_DIR="${MODEL_ROUTER_BONSAI_DIR:-$models_dir/bonsai}"
-slot_dir="${MODEL_ROUTER_SLOT_DIR:-$HOME/Drives/Files/.tmp/slot-cache}"
-export MODEL_ROUTER_SLOT_DIR="$slot_dir"
+export MODEL_ROUTER_GGUF_DIR="${MODEL_ROUTER_GGUF_DIR:-$(stack gguf-stack)/models}"
+export MODEL_ROUTER_BONSAI_DIR="${MODEL_ROUTER_BONSAI_DIR:-$(stack bonsai-stack)/models}"
 export MODEL_ROUTER_BONSAI_IMAGE="${MODEL_ROUTER_BONSAI_IMAGE:-bonsai-llama-4090:sm89}"
 export MODEL_ROUTER_PORT="$port"
 export MODEL_ROUTER_BACKEND_PORT="$backend_port"

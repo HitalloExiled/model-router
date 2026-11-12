@@ -46,15 +46,24 @@ The service is configured by `scripts/setup-service.sh`; it points
 `stacks/` are SSH-pinned submodules: `git submodule update --init` before the
 first `make setup` on a fresh clone.
 
-Model artifacts live **outside** the repo: `MODEL_ROUTER_MODELS_DIR`
-(default `~/Drives/Files/AI/Models`, with `gguf/` and `bonsai/` under it) is
-what the service and `scripts/download-models.sh` use. They are never inside
-the submodules, so `git submodule deinit`/clone cannot destroy them.
+Model artifacts and the slot cache (warm KV state, several GB) default to the
+repo: the stack launchers read `<repo>/stacks/<stack>/models` and the router
+keeps slots in `<repo>/slot-cache` (mounted into the backend at `/slot-cache`).
 
-The slot cache (warm KV state, several GB) also lives outside the repo:
-`MODEL_ROUTER_SLOT_DIR` (default `~/Drives/Files/.tmp/slot-cache`). The
-router mounts it into the backend at `/slot-cache`; without the variable it
-falls back to `<repo>/slot-cache`.
+A machine that stores them elsewhere (e.g. another drive) keeps the paths
+outside the repo in `~/.config/model-router/env`:
+
+```
+MODEL_ROUTER_GGUF_DIR=/path/to/gguf
+MODEL_ROUTER_BONSAI_DIR=/path/to/bonsai
+MODEL_ROUTER_SLOT_DIR=/path/to/slot-cache
+```
+
+The scripts load it through `scripts/lib/env.sh` (`MODEL_ROUTER_ENV_FILE`
+overrides the path) and the unit reads it with
+`EnvironmentFile=-%h/.config/model-router/env`. Anything already exported wins
+over the file. Keeping these paths out of the repo also means a submodule
+`deinit`/clone cannot destroy them.
 
 The Python implementation this port replaced is kept only in history
 (`backup/main-python`).

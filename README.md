@@ -51,5 +51,10 @@ Model artifacts live **outside** the repo: `MODEL_ROUTER_MODELS_DIR`
 what the service and `scripts/download-models.sh` use. They are never inside
 the submodules, so `git submodule deinit`/clone cannot destroy them.
 
+The slot cache (warm KV state, several GB) also lives outside the repo:
+`MODEL_ROUTER_SLOT_DIR` (default `~/Drives/Files/.tmp/slot-cache`). The
+router mounts it into the backend at `/slot-cache`; without the variable it
+falls back to `<repo>/slot-cache`.
+
 The Python implementation this port replaced is kept only in history
 (`backup/main-python`).

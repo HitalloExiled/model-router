@@ -10,7 +10,7 @@ SOLUTION := ModelRouter.slnx
 export DOTNET
 export DOTNET_ROOT
 
-.PHONY: all build publish test ab analyze setup run e2e clean
+.PHONY: all build publish test analyze setup run e2e clean
 
 all: build
 
@@ -22,9 +22,6 @@ publish:
 
 test:
 	$(DOTNET) test $(TESTS) -c Release
-
-ab:
-	python3 tests/ab/ab.py
 
 analyze:
 	$(DOTNET) roslynator analyze $(SOLUTION)
@@ -40,5 +37,4 @@ e2e:
 
 clean:
 	rm -rf src/ModelRouter/bin src/ModelRouter/obj \
-	       src/ModelRouter.Tests/bin src/ModelRouter.Tests/obj \
-	       tests/ab/AbRunner/bin tests/ab/AbRunner/obj
+	       src/ModelRouter.Tests/bin src/ModelRouter.Tests/obj

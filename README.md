@@ -27,7 +27,6 @@ make publish    # AOT single-file ELF (src/ModelRouter/bin/Release/net11.0/.../p
 make setup      # install/refresh model-router.net.service (:18090)
 make run        # foreground
 make e2e        # streaming chat against :18090 (needs backend/GPU)
-make ab         # Python differential test (needs ../model-router)
 ```
 
 `DOTNET ?= /usr/lib64/dotnet/dotnet` (the .NET 11 SDK). Override with

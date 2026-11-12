@@ -2,9 +2,9 @@
 #
 # scripts/build-router.sh — publish the .NET 11 AOT router (single-file ELF).
 #
-# The output is what scripts/setup.sh installs in model-router.service and
+# The output is what scripts/setup.sh installs in model-router.net.service and
 # what scripts/run-router.sh execs:
-#   bin/Release/net10.0/linux-x64/publish/model-router
+#   bin/Release/net11.0/linux-x64/publish/model-router
 #
 # Env:
 #   DOTNET   dotnet executable (default: dotnet)

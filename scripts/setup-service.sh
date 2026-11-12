@@ -10,12 +10,12 @@
 # --print        print the unit and exit (do not touch systemd)
 # --no-start     write the unit and enable it, but do not start/restart now
 #
-# The .NET router uses the stacks/models from the main checkout (RouterDir);
-# MODEL_ROUTER_MAIN_DIR overrides it.
+# The .NET router and the stacks live in the same checkout (RouterDir);
+# MODEL_ROUTER_MAIN_DIR overrides it (e.g. a worktree with no submodules).
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-MAIN_DIR="${MODEL_ROUTER_MAIN_DIR:-$(cd -- "${ROOT_DIR}/../model-router" 2>/dev/null && pwd || echo "$ROOT_DIR")}"
+MAIN_DIR="${MODEL_ROUTER_MAIN_DIR:-$ROOT_DIR}"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT_NAME="model-router.net.service"
 UNIT_FILE="$UNIT_DIR/$UNIT_NAME"
@@ -54,7 +54,7 @@ fi
 unit() {
   cat <<UNIT
 [Unit]
-Description=Model router (.NET 10) — :${PORT}
+Description=Model router (.NET 11) — :${PORT}
 
 [Service]
 Type=simple
@@ -64,10 +64,10 @@ Environment=MODEL_ROUTER_PORT=${PORT}
 Environment=MODEL_ROUTER_BACKEND_PORT=${BACKEND_PORT}
 Environment=MODEL_ROUTER_IDLE_SEC=${IDLE_SEC}
 Environment=MODEL_ROUTER_DIR=${MAIN_DIR}
-Environment=MODEL_ROUTER_LLAMA_SERVE_SH=${MAIN_DIR}/gguf-stack/serve-llama.sh
-Environment=MODEL_ROUTER_BONSAI_SERVE_SH=${MAIN_DIR}/bonsai-stack/serve-bonsai.sh
-Environment=MODEL_ROUTER_GGUF_DIR=${MAIN_DIR}/gguf-stack/models
-Environment=MODEL_ROUTER_BONSAI_DIR=${MAIN_DIR}/bonsai-stack/models
+Environment=MODEL_ROUTER_LLAMA_SERVE_SH=${MAIN_DIR}/stacks/gguf-stack/serve-llama.sh
+Environment=MODEL_ROUTER_BONSAI_SERVE_SH=${MAIN_DIR}/stacks/bonsai-stack/serve-bonsai.sh
+Environment=MODEL_ROUTER_GGUF_DIR=${MAIN_DIR}/stacks/gguf-stack/models
+Environment=MODEL_ROUTER_BONSAI_DIR=${MAIN_DIR}/stacks/bonsai-stack/models
 Environment=MODEL_ROUTER_BONSAI_IMAGE=${BONSAI_IMAGE}
 Environment=DOTNET_ROOT=/usr/lib64/dotnet
 Restart=on-failure

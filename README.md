@@ -41,5 +41,10 @@ directly.
 ## Environment
 
 The service is configured by `scripts/setup-service.sh`; it points
-`MODEL_ROUTER_DIR` at the main checkout (the stacks are SSH-pinned submodules)
-and runs the AOT binary from `src/ModelRouter/bin/Release/net11.0/linux-x64/publish/`.
+`MODEL_ROUTER_DIR` at the repo root and runs the AOT binary from
+`src/ModelRouter/bin/Release/net11.0/linux-x64/publish/`. The stacks under
+`stacks/` are SSH-pinned submodules: `git submodule update --init` before the
+first `make setup` on a fresh clone.
+
+The Python implementation this port replaced is kept only in history
+(`backup/main-python`).

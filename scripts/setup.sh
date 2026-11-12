@@ -3,7 +3,7 @@
 # scripts/setup.sh — Build the full model-serving stack from scratch.
 #
 # What it does:
-#   1. Checks prerequisites (docker, nvidia-smi, python3, nvidia-docker runtime).
+#   1. Checks prerequisites (docker, nvidia-smi, nvidia-docker runtime).
 #   2. Ensures Docker images for both stacks:
 #        ghcr.io/ggml-org/llama.cpp:server-cuda  (pulled from ghcr.io)
 #        bonsai-llama-4090:sm89               (built from bonsai-stack/llama.cpp submodule)
@@ -39,8 +39,8 @@ resolve_stack() {
 GGUF_STACK="$(resolve_stack gguf-stack)"
 BONSAI_STACK="$(resolve_stack bonsai-stack)"
 MODEL_ROUTER="${ROOT_DIR}"
-# The router is the .NET 10 AOT port (single-file ELF). Older checkouts ran
-# model-router.py; MODEL_ROUTER_BIN overrides the binary path.
+# The router is the .NET 11 AOT port (single-file ELF); MODEL_ROUTER_BIN
+# overrides the binary path.
 ROUTER_BIN="${MODEL_ROUTER_BIN:-${ROOT_DIR}/src/ModelRouter/bin/Release/net11.0/linux-x64/publish/model-router}"
 
 BONSAI_IMAGE="${MODEL_ROUTER_BONSAI_IMAGE:-bonsai-llama-4090:sm89}"
@@ -77,7 +77,6 @@ require_file() {
 log "Checking prerequisites..."
 require_cmd docker
 require_cmd nvidia-smi
-require_cmd python3
 
 if ! docker info >/dev/null 2>&1; then
   printf 'error: docker daemon is not reachable\n' >&2
@@ -199,7 +198,7 @@ mkdir -p "${UNIT_DIR}"
 
 cat > "${UNIT_FILE}" <<UNIT
 [Unit]
-Description=Model router (RTX 4090)
+Description=Model router (.NET 11) — :18090
 
 [Service]
 Type=simple

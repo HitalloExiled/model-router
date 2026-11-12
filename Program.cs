@@ -163,8 +163,9 @@ static async Task RelayAsync(HttpContext ctx, string method, string path,
         }
         await ForwardAsync(ctx, method, path, body, retryable, fwd);
     }
-    catch (Exception)
+    catch (Exception ex)
     {
+        Console.WriteLine($"[relay] {ex}");
         try
         {
             ctx.Response.StatusCode = 502;
@@ -195,7 +196,15 @@ static async Task ForwardAsync(HttpContext ctx, string method, string path,
             // throws (misused header name). Content-Type is set on the
             // ByteArrayContent below and Content-Length is derived from it.
             if (header.Key.StartsWith("Content-", StringComparison.OrdinalIgnoreCase)) continue;
-            foreach (var v in header.Value) req.Headers.Add(header.Key, v);
+            try
+            {
+                foreach (var v in header.Value) req.Headers.Add(header.Key, v);
+            }
+            catch (Exception ex)
+            {
+                // A single rejected header must not fail the whole turn.
+                Console.WriteLine($"[relay] dropped header '{header.Key}': {ex.Message}");
+            }
         }
         if (body is { Length: > 0 })
         {
@@ -209,8 +218,9 @@ static async Task ForwardAsync(HttpContext ctx, string method, string path,
         {
             resp = await fwd.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[relay] forward failed: {ex}");
             ctx.Response.StatusCode = 502;
             ctx.Response.ContentType = "application/json";
             await ctx.Response.WriteAsync("{\"error\": \"cannot connect to backend\"}");

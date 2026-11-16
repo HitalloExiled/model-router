@@ -1,14 +1,9 @@
-DOTNET ?= /usr/lib64/dotnet/dotnet
-# Tools that host MSBuild (roslynator) enumerate SDKs under DOTNET_ROOT, not
-# under DOTNET: with DOTNET_ROOT on an older SDK they load net11 assets with
-# SDK 10 and fail every reference. Keep it aligned with the SDK in use.
-DOTNET_ROOT := $(patsubst %/,%,$(dir $(DOTNET)))
+# Let the environment resolve the SDK: `dotnet` comes from PATH, and
+# DOTNET/DOTNET_ROOT can be supplied by the environment.
+DOTNET ?= dotnet
 PROJECT := src/ModelRouter/ModelRouter.csproj
 TESTS := src/ModelRouter.Tests/ModelRouter.Tests.csproj
 SOLUTION := ModelRouter.slnx
-
-export DOTNET
-export DOTNET_ROOT
 
 .PHONY: all build publish test analyze setup run e2e clean
 

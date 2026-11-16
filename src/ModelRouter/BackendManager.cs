@@ -60,7 +60,7 @@ public sealed class BackendManager : IAsyncDisposable
         "MODEL_ROUTER_BONSAI_SERVE_SH")
         ?? Path.Combine(ResolveStackDir("bonsai-stack"), "serve-bonsai.sh");
     public static readonly string LlamaImage = Environment.GetEnvironmentVariable(
-        "MODEL_ROUTER_LLAMA_IMAGE") ?? "ghcr.io/ggml-org/llama.cpp:server-cuda-b12110";
+        "MODEL_ROUTER_LLAMA_IMAGE") ?? "ghcr.io/ggml-org/llama.cpp:server-cuda-b12375";
     public static readonly string BonsaiImage = Environment.GetEnvironmentVariable(
         "MODEL_ROUTER_BONSAI_IMAGE") ?? "bonsai-llama-4090:sm89";
 

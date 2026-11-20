@@ -59,8 +59,12 @@ public sealed class BackendManager : IAsyncDisposable
     public static readonly string BonsaiServe = Environment.GetEnvironmentVariable(
         "MODEL_ROUTER_BONSAI_SERVE_SH")
         ?? Path.Combine(ResolveStackDir("bonsai-stack"), "serve-bonsai.sh");
+    // Pinned by digest: per-build server-cuda-bXXXX tags stopped at b12429, so the
+    // mutable tag is the only channel. Digest below is b12464 (revision d3c3e24);
+    // rollback is ghcr.io/ggml-org/llama.cpp:server-cuda-b12375.
     public static readonly string LlamaImage = Environment.GetEnvironmentVariable(
-        "MODEL_ROUTER_LLAMA_IMAGE") ?? "ghcr.io/ggml-org/llama.cpp:server-cuda-b12375";
+        "MODEL_ROUTER_LLAMA_IMAGE")
+        ?? "ghcr.io/ggml-org/llama.cpp:server-cuda@sha256:ae96e52f8b2106ea82bad786ee2d08bb9b0a8c93403df9c27ae1bf065a118089";
     public static readonly string BonsaiImage = Environment.GetEnvironmentVariable(
         "MODEL_ROUTER_BONSAI_IMAGE") ?? "bonsai-llama-4090:sm89";
 
